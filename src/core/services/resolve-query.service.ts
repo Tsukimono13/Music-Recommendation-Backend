@@ -9,6 +9,7 @@ import { normalizeTag, normalizeArtistName } from "../utils/normalize";
 export interface QueryResult {
   artists: { artist: string; score: number }[];
   tags?: string[];
+  fallbackArtists?: { artist: string; score: number }[];
 }
 
 function normalizeToPercent(
@@ -73,8 +74,12 @@ export async function resolveQuery(
         ),
       );
 
-      let intersection = intersectArtistSignals(all);
+      const intersection = intersectArtistSignals(all);
 
+      const allSignalsFlat = all.flat();
+      const tags = extractUniqueTags(allSignalsFlat);
+
+      // Если нет пересечений, возвращаем пустой artists и fallbackArtists
       if (intersection.length === 0) {
         const fallbackArtists: { artist: string; score: number }[] = [];
         const seen = new Set<string>();
@@ -98,13 +103,17 @@ export async function resolveQuery(
           }
         }
 
-        intersection = fallbackArtists;
+        const normalizedFallback = normalizeToPercent(fallbackArtists);
+
+        return {
+          artists: [],
+          tags: tags.length > 0 ? tags : undefined,
+          fallbackArtists: normalizedFallback,
+        };
       }
 
+      // Если есть пересечения, возвращаем их
       const normalized = normalizeToPercent(intersection);
-
-      const allSignalsFlat = all.flat();
-      const tags = extractUniqueTags(allSignalsFlat);
 
       return {
         artists: normalized,

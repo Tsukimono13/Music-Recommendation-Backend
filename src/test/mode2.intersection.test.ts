@@ -33,11 +33,19 @@ import { resolveQuery } from "../core/services/resolve-query.service";
     process.env.LASTFM_API_KEY!,
   );
 
-  console.log(`Найдено артистов: ${test2.artists.length}`);
-  console.log("Результаты (топ-2 для каждой группы):");
-  test2.artists.slice(0, 10).forEach((item, idx) => {
-    console.log(`  ${idx + 1}. ${item.artist} — ${item.score}%`);
-  });
+  console.log(`Пересечений найдено: ${test2.artists.length}`);
+  if (test2.artists.length === 0) {
+    console.log("✅ Пересечений нет, используем fallback");
+  }
+
+  if (test2.fallbackArtists && test2.fallbackArtists.length > 0) {
+    console.log(`\nFallback артистов: ${test2.fallbackArtists.length}`);
+    console.log("Топ-2 для каждой группы (в порядке групп):");
+    test2.fallbackArtists.forEach((item, idx) => {
+      console.log(`  ${idx + 1}. ${item.artist} — ${item.score}%`);
+    });
+  }
+
   if (test2.tags && test2.tags.length > 0) {
     console.log(`\nТеги: ${test2.tags.slice(0, 10).join(", ")}`);
   }
