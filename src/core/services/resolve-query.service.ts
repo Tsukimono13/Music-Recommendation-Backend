@@ -4,7 +4,7 @@ import { collectSignalsForArtist } from "./signals.service";
 import { buildRecommendations } from "./recommend.service";
 import { intersectArtistSignals } from "./intersection.service";
 import { MusicSignal } from "../models/music-signal.model";
-import { normalizeTag } from "../utils/normalize";
+import { normalizeTag, normalizeArtistName } from "../utils/normalize";
 
 export interface QueryResult {
   artists: { artist: string; score: number }[];
@@ -73,7 +73,34 @@ export async function resolveQuery(
         ),
       );
 
-      const intersection = intersectArtistSignals(all);
+      let intersection = intersectArtistSignals(all);
+
+      if (intersection.length === 0) {
+        const fallbackArtists: { artist: string; score: number }[] = [];
+        const seen = new Set<string>();
+
+        for (const signals of all) {
+          const artistSignals = signals
+            .filter((s) => s.kind === "artist" && s.source === "lastfm")
+            .map((s) => ({
+              artist: s.value,
+              score: s.weight,
+            }))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 2);
+
+          for (const item of artistSignals) {
+            const key = normalizeArtistName(item.artist);
+            if (!seen.has(key)) {
+              seen.add(key);
+              fallbackArtists.push(item);
+            }
+          }
+        }
+
+        intersection = fallbackArtists;
+      }
+
       const normalized = normalizeToPercent(intersection);
 
       const allSignalsFlat = all.flat();
