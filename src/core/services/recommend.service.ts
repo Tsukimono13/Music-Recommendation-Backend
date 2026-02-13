@@ -3,10 +3,15 @@ import { expandTagsToArtistSignals } from "./tag-expand.service";
 import { normalizeArtistName } from "../utils/normalize";
 import { RecommendMode } from "../types";
 
+export interface BuildRecommendationsResult {
+  artists: { artist: string; score: number }[];
+  notFoundTags: string[];
+}
+
 export async function buildRecommendations(
   signals: MusicSignal[],
   apiKey: string,
-) {
+): Promise<BuildRecommendationsResult> {
   const tagSignals: MusicSignal[] = [];
   const artistSignals: MusicSignal[] = [];
 
@@ -18,7 +23,7 @@ export async function buildRecommendations(
     }
   }
 
-  const expandedArtists = await expandTagsToArtistSignals(tagSignals, apiKey);
+  const { signals: expandedArtists, notFoundTags } = await expandTagsToArtistSignals(tagSignals, apiKey);
 
   const allArtists = [...artistSignals, ...expandedArtists];
 
@@ -29,8 +34,13 @@ export async function buildRecommendations(
     scoreMap.set(key, (scoreMap.get(key) ?? 0) + s.weight);
   }
 
-  return [...scoreMap.entries()]
+  const artists = [...scoreMap.entries()]
     .map(([artist, score]) => ({ artist, score }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 30);
+
+  return {
+    artists,
+    notFoundTags,
+  };
 }

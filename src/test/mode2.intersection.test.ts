@@ -16,11 +16,18 @@ import { resolveQuery } from "../core/services/resolve-query.service";
   console.log(`Найдено артистов: ${test1.artists.length}`);
   console.log("Топ-10 результатов:");
   test1.artists.slice(0, 10).forEach((item, idx) => {
+    const spotifyInfo = item.spotifyUrl 
+      ? `✅ ${item.spotifyUrl}` 
+      : `❌ Spotify не найден`;
     console.log(`  ${idx + 1}. ${item.artist} — ${item.score}%`);
+    console.log(`     ${spotifyInfo}`);
   });
   if (test1.tags && test1.tags.length > 0) {
     console.log(`\nТеги: ${test1.tags.slice(0, 10).join(", ")}`);
   }
+  
+  const withSpotify1 = test1.artists.filter(a => a.spotifyUrl).length;
+  console.log(`\n📊 С Spotify: ${withSpotify1}/${test1.artists.length}`);
 
   console.log("\n" + "=".repeat(50) + "\n");
 
@@ -42,8 +49,15 @@ import { resolveQuery } from "../core/services/resolve-query.service";
     console.log(`\nFallback артистов: ${test2.fallbackArtists.length}`);
     console.log("Топ-2 для каждой группы (в порядке групп):");
     test2.fallbackArtists.forEach((item, idx) => {
+      const spotifyInfo = item.spotifyUrl 
+        ? `✅ ${item.spotifyUrl}` 
+        : `❌ Spotify не найден`;
       console.log(`  ${idx + 1}. ${item.artist} — ${item.score}%`);
+      console.log(`     ${spotifyInfo}`);
     });
+    
+    const withSpotify2 = test2.fallbackArtists.filter(a => a.spotifyUrl).length;
+    console.log(`\n📊 Fallback с Spotify: ${withSpotify2}/${test2.fallbackArtists.length}`);
   }
 
   if (test2.tags && test2.tags.length > 0) {
@@ -64,9 +78,16 @@ import { resolveQuery } from "../core/services/resolve-query.service";
   console.log(`Найдено артистов: ${test3.artists.length}`);
   console.log("Топ-10 результатов:");
   test3.artists.slice(0, 10).forEach((item, idx) => {
+    const spotifyInfo = item.spotifyUrl 
+      ? `✅ ${item.spotifyUrl}` 
+      : `❌ Spotify не найден`;
     console.log(`  ${idx + 1}. ${item.artist} — ${item.score}%`);
+    console.log(`     ${spotifyInfo}`);
   });
   if (test3.tags && test3.tags.length > 0) {
     console.log(`\nТеги: ${test3.tags.slice(0, 10).join(", ")}`);
   }
+  
+  const withSpotify3 = test3.artists.filter(a => a.spotifyUrl).length;
+  console.log(`\n📊 С Spotify: ${withSpotify3}/${test3.artists.length}`);
 })();

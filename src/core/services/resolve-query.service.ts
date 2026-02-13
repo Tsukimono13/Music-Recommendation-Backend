@@ -5,16 +5,19 @@ import { buildRecommendations } from "./recommend.service";
 import { intersectArtistSignals } from "./intersection.service";
 import { MusicSignal } from "../models/music-signal.model";
 import { normalizeTag, normalizeArtistName } from "../utils/normalize";
+import { searchArtist } from "../providers/spotify.provider";
 
 export interface QueryResult {
-  artists: { artist: string; score: number }[];
+  artists: { artist: string; score: number; spotifyUrl?: string }[];
   tags?: string[];
-  fallbackArtists?: { artist: string; score: number }[];
+  fallbackArtists?: { artist: string; score: number; spotifyUrl?: string }[];
+  notFoundArtists?: string[];
+  notFoundTags?: string[];
 }
 
 function normalizeToPercent(
-  results: { artist: string; score: number }[],
-): { artist: string; score: number }[] {
+  results: { artist: string; score: number; spotifyUrl?: string }[],
+): { artist: string; score: number; spotifyUrl?: string }[] {
   if (results.length === 0) return [];
 
   const maxScore = results[0]?.score ?? 1;
@@ -23,7 +26,40 @@ function normalizeToPercent(
   return results.map((item) => ({
     artist: item.artist,
     score: Math.round((item.score / maxScore) * 100),
+    spotifyUrl: item.spotifyUrl,
   }));
+}
+
+
+async function enrichArtistsWithSpotifyUrls(
+  artists: { artist: string; score: number }[],
+): Promise<{ enriched: { artist: string; score: number; spotifyUrl?: string }[] }> {
+  if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
+    return {
+      enriched: artists.map((a) => ({ ...a })),
+    };
+  }
+
+  const enriched = await Promise.all(
+    artists.map(async (item) => {
+      try {
+        const spotifyArtist = await searchArtist(item.artist);
+        if (spotifyArtist) {
+          return {
+            ...item,
+            spotifyUrl: `https://open.spotify.com/artist/${spotifyArtist.id}`,
+          };
+        }
+      } catch (err) {
+        console.warn(
+          `[Spotify] Failed to find artist "${item.artist}": ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return { ...item };
+    }),
+  );
+
+  return { enriched };
 }
 
 function extractUniqueTags(signals: MusicSignal[]): string[] {
@@ -57,12 +93,13 @@ export async function resolveQuery(
       );
 
       const result = await buildRecommendations(artistSignals, apiKey);
-      const normalized = normalizeToPercent(result);
+      const normalized = normalizeToPercent(result.artists);
+      const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 
       const tags = extractUniqueTags(signals);
 
       return {
-        artists: normalized,
+        artists: enriched,
         tags: tags.length > 0 ? tags : undefined,
       };
     }
@@ -104,19 +141,21 @@ export async function resolveQuery(
         }
 
         const normalizedFallback = normalizeToPercent(fallbackArtists);
+        const { enriched: enrichedFallback } = await enrichArtistsWithSpotifyUrls(normalizedFallback);
 
         return {
           artists: [],
           tags: tags.length > 0 ? tags : undefined,
-          fallbackArtists: normalizedFallback,
+          fallbackArtists: enrichedFallback,
         };
       }
 
       // Если есть пересечения, возвращаем их
       const normalized = normalizeToPercent(intersection);
+      const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 
       return {
-        artists: normalized,
+        artists: enriched,
         tags: tags.length > 0 ? tags : undefined,
       };
     }
@@ -130,22 +169,43 @@ export async function resolveQuery(
       }));
 
       const result = await buildRecommendations(signals, apiKey);
-      const normalized = normalizeToPercent(result);
+      const normalized = normalizeToPercent(result.artists);
+      const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 
       return {
-        artists: normalized,
+        artists: enriched,
       };
     }
 
     case "artist+tags": {
-      const allSignals = (
-        await Promise.all(
-          input.artists!.map((a) =>
-            collectSignalsForArtist(a, { lastfm: apiKey }),
-          ),
-        )
-      ).flat();
+      const notFoundArtists: string[] = [];
 
+      // Собираем сигналы для каждого артиста отдельно, чтобы проверить результаты
+      const artistSignalsResults = await Promise.all(
+        input.artists!.map(async (artistName) => {
+          const signals = await collectSignalsForArtist(artistName, {
+            lastfm: apiKey,
+          });
+          const similarArtists = signals.filter(
+            (s) => s.kind === "artist" && s.source === "lastfm",
+          );
+          return {
+            artistName,
+            signals,
+            hasSimilar: similarArtists.length > 0,
+          };
+        }),
+      );
+
+      // Проверяем, какие артисты не дали похожих артистов
+      for (const result of artistSignalsResults) {
+        if (!result.hasSimilar) {
+          notFoundArtists.push(result.artistName);
+        }
+      }
+
+      // Объединяем все сигналы
+      const allSignals = artistSignalsResults.flatMap((r) => r.signals);
       const artistSignals = allSignals.filter((s) => s.kind === "artist");
 
       const userTagSignals: MusicSignal[] = input.tags!.map((t) => ({
@@ -159,7 +219,9 @@ export async function resolveQuery(
         [...artistSignals, ...userTagSignals],
         apiKey,
       );
-      const normalized = normalizeToPercent(result);
+
+      const normalized = normalizeToPercent(result.artists);
+      const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 
       const allTags = [
         ...extractUniqueTags(allSignals),
@@ -168,8 +230,10 @@ export async function resolveQuery(
       const uniqueTags = Array.from(new Set(allTags)).sort();
 
       return {
-        artists: normalized,
+        artists: enriched,
         tags: uniqueTags.length > 0 ? uniqueTags : undefined,
+        notFoundArtists: notFoundArtists.length > 0 ? notFoundArtists : undefined,
+        notFoundTags: result.notFoundTags.length > 0 ? result.notFoundTags : undefined,
       };
     }
   }

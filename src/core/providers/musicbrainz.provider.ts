@@ -34,7 +34,6 @@ export async function getMusicBrainzTags(
       { headers: HEADERS },
     );
 
-    // Обработка 503 - возвращаем пустой массив вместо ошибки
     if (searchRes.status === 503) {
       console.warn(
         `[MusicBrainz] Rate limit exceeded for artist: ${artistName}. Returning empty tags.`,
@@ -47,13 +46,13 @@ export async function getMusicBrainzTags(
       console.warn(
         `[MusicBrainz] API error ${searchRes.status} for artist: ${artistName}. ${errorText}`,
       );
-      return []; // Возвращаем пустой массив вместо ошибки
+      return []; 
     }
   } catch (err) {
     console.warn(
       `[MusicBrainz] Request failed for artist: ${artistName}. ${err instanceof Error ? err.message : String(err)}`,
     );
-    return []; // Возвращаем пустой массив вместо ошибки
+    return []; 
   }
 
   const searchData = await searchRes.json();
@@ -63,7 +62,7 @@ export async function getMusicBrainzTags(
     return [];
   }
 
-  // Rate limiting перед вторым запросом
+
   await musicBrainzRateLimiter.wait();
 
   let detailsRes: Response;
@@ -73,7 +72,6 @@ export async function getMusicBrainzTags(
       { headers: HEADERS },
     );
 
-    // Обработка 503 - возвращаем пустой массив вместо ошибки
     if (detailsRes.status === 503) {
       console.warn(
         `[MusicBrainz] Rate limit exceeded for artist details: ${artist.id}. Returning empty tags.`,
@@ -86,13 +84,13 @@ export async function getMusicBrainzTags(
       console.warn(
         `[MusicBrainz] API error ${detailsRes.status} for artist details: ${artist.id}. ${errorText}`,
       );
-      return []; // Возвращаем пустой массив вместо ошибки
+      return []; 
     }
   } catch (err) {
     console.warn(
       `[MusicBrainz] Request failed for artist details: ${artist.id}. ${err instanceof Error ? err.message : String(err)}`,
     );
-    return []; // Возвращаем пустой массив вместо ошибки
+    return [];
   }
 
   const details = await detailsRes.json();

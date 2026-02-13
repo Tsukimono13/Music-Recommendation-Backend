@@ -1,4 +1,4 @@
-class ApiRateLimiter {
+export class ApiRateLimiter {
   private lastRequestTime: number = 0;
   private minDelay: number;
 

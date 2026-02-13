@@ -1,29 +1,31 @@
 import "dotenv/config";
-import { buildRecommendations } from "../core/services/recommend.service";
-import { MusicSignal } from "../core/models/music-signal.model";
-
-function normalizeToPercent(results: { artist: string; score: number }[]) {
-  if (results.length === 0) return [];
-  const maxScore = results[0].score;
-  return results.map((item) => ({
-    artist: item.artist,
-    score: Math.round((item.score / maxScore) * 100),
-  }));
-}
+import { resolveQuery } from "../core/services/resolve-query.service";
 
 (async () => {
-  const tagSignals: MusicSignal[] = [
-    { kind: "tag", source: "user", value: "rock", weight: 1 },
-    { kind: "tag", source: "user", value: "gothic metal", weight: 8 },
-  ];
+  console.log("\n=== TAGS ONLY MODE TEST ===");
+  console.log("Теги: rock, gothic metal\n");
 
-  const result = await buildRecommendations(
-    tagSignals,
+  const result = await resolveQuery(
+    {
+      tags: ["rock", "gothic metal"],
+    },
     process.env.LASTFM_API_KEY!,
   );
 
-  const normalized = normalizeToPercent(result);
+  console.log(`Найдено артистов: ${result.artists.length}\n`);
 
-  console.log("TAGS ONLY (PERCENTS):");
-  console.log(normalized.slice(0, 15));
+  result.artists.slice(0, 15).forEach((item, idx) => {
+    const spotifyInfo = item.spotifyUrl 
+      ? `✅ Spotify: ${item.spotifyUrl}` 
+      : `❌ Spotify: не найден`;
+    console.log(`${idx + 1}. ${item.artist} — ${item.score}%`);
+    console.log(`   ${spotifyInfo}`);
+  });
+
+  // Статистика
+  const withSpotify = result.artists.filter(a => a.spotifyUrl).length;
+  console.log(`\n📊 Статистика:`);
+  console.log(`   Всего артистов: ${result.artists.length}`);
+  console.log(`   С Spotify ссылкой: ${withSpotify}`);
+  console.log(`   Без Spotify ссылки: ${result.artists.length - withSpotify}`);
 })();
