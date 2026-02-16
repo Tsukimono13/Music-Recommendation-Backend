@@ -1,5 +1,5 @@
 import { MusicSignal } from "../models/music-signal.model";
-import { normalizeArtistName } from "../utils/normalize";
+import { normalizeArtistName, isSensibleArtistName } from "../utils/normalize";
 
 export function intersectArtistSignals(artistSignals: MusicSignal[][]) {
   const counts = new Map<string, number>();
@@ -12,6 +12,7 @@ export function intersectArtistSignals(artistSignals: MusicSignal[][]) {
       if (s.kind !== "artist") continue;
 
       const key = normalizeArtistName(s.value);
+      if (!isSensibleArtistName(key)) continue;
       if (seen.has(key)) continue;
 
       seen.add(key);
@@ -23,7 +24,7 @@ export function intersectArtistSignals(artistSignals: MusicSignal[][]) {
   const required = artistSignals.length;
 
   return [...scores.entries()]
-    .filter(([artist]) => counts.get(artist)! >= required)
+    .filter(([artist]) => isSensibleArtistName(artist) && counts.get(artist)! >= required)
     .map(([artist, score]) => ({ artist, score }))
     .sort((a, b) => b.score - a.score);
 }

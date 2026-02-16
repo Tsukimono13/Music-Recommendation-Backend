@@ -18,7 +18,6 @@ export interface MusicBrainzTag {
 export async function getMusicBrainzTags(
   artistName: string,
 ): Promise<MusicBrainzTag[]> {
-  // Rate limiting для MusicBrainz
   await musicBrainzRateLimiter.wait();
 
   const searchParams = new URLSearchParams({

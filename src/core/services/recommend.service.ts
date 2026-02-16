@@ -1,7 +1,6 @@
 import { MusicSignal } from "../models/music-signal.model";
 import { expandTagsToArtistSignals } from "./tag-expand.service";
-import { normalizeArtistName } from "../utils/normalize";
-import { RecommendMode } from "../types";
+import { normalizeArtistName, isSensibleArtistName } from "../utils/normalize";
 
 export interface BuildRecommendationsResult {
   artists: { artist: string; score: number }[];
@@ -35,6 +34,7 @@ export async function buildRecommendations(
   }
 
   const artists = [...scoreMap.entries()]
+    .filter(([artist]) => isSensibleArtistName(artist))
     .map(([artist, score]) => ({ artist, score }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 30);

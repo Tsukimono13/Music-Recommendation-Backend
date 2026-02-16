@@ -2,19 +2,24 @@ export class ApiRateLimiter {
   private lastRequestTime: number = 0;
   private minDelay: number;
 
+  private queue: Promise<void> = Promise.resolve();
+
   constructor(minDelayMs: number) {
     this.minDelay = minDelayMs;
   }
 
   async wait(): Promise<void> {
+    const prev = this.queue;
+    this.queue = prev.then(() => this.waitOne());
+    return this.queue;
+  }
+
+  private async waitOne(): Promise<void> {
     const now = Date.now();
-    const timeSinceLastRequest = now - this.lastRequestTime;
-
-    if (timeSinceLastRequest < this.minDelay) {
-      const waitTime = this.minDelay - timeSinceLastRequest;
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    const elapsed = now - this.lastRequestTime;
+    if (elapsed < this.minDelay) {
+      await new Promise((r) => setTimeout(r, this.minDelay - elapsed));
     }
-
     this.lastRequestTime = Date.now();
   }
 }

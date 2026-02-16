@@ -30,18 +30,57 @@ async function fetchLastFM(params: URLSearchParams) {
   }
 }
 
-export async function getSimilarArtists(artist: string, apiKey: string) {
+export async function searchArtist(
+  artist: string,
+  apiKey: string,
+): Promise<{ name: string; mbid: string | null } | null> {
   const params = new URLSearchParams({
-    method: "artist.getsimilar",
-    artist,
+    method: "artist.search",
+    artist: artist.trim(),
     api_key: apiKey,
     format: "json",
-    limit: "20",
-    autocorrect: "1",
+    limit: "5",
   });
 
   const data = await fetchLastFM(params);
-  return data?.similarartists?.artist ?? [];
+  const list = data?.results?.artistmatches?.artist;
+  if (!list?.length) return null;
+
+  const first = Array.isArray(list) ? list[0] : list;
+  const mbid = first.mbid?.trim() || null;
+  const name = first.name?.trim();
+  if (!name) return null;
+
+  return { name, mbid };
+}
+
+import { isSensibleArtistName } from "../utils/normalize";
+
+export async function getSimilarArtists(
+  artist: string,
+  apiKey: string,
+  options?: { mbid?: string | null },
+) {
+  const params = new URLSearchParams({
+    method: "artist.getsimilar",
+    api_key: apiKey,
+    format: "json",
+    limit: "100",
+  });
+
+  if (options?.mbid) {
+    params.set("mbid", options.mbid);
+  } else {
+    params.set("artist", artist.trim());
+    params.set("autocorrect", "1");
+  }
+
+  const data = await fetchLastFM(params);
+  const raw = data?.similarartists?.artist ?? [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.filter((a: { name?: string }) =>
+    isSensibleArtistName(String(a?.name ?? "").trim()),
+  );
 }
 
 export async function getArtistTopTags(

@@ -4,7 +4,7 @@ import { collectSignalsForArtist } from "./signals.service";
 import { buildRecommendations } from "./recommend.service";
 import { intersectArtistSignals } from "./intersection.service";
 import { MusicSignal } from "../models/music-signal.model";
-import { normalizeTag, normalizeArtistName } from "../utils/normalize";
+import { normalizeTag, normalizeArtistName, isSensibleArtistName } from "../utils/normalize";
 import { searchArtist } from "../providers/spotify.provider";
 
 export interface QueryResult {
@@ -42,6 +42,7 @@ async function enrichArtistsWithSpotifyUrls(
 
   const enriched = await Promise.all(
     artists.map(async (item) => {
+      if (!item.artist?.trim()) return { ...item };
       try {
         const spotifyArtist = await searchArtist(item.artist);
         if (spotifyArtist) {
@@ -132,6 +133,7 @@ export async function resolveQuery(
             .slice(0, 2);
 
           for (const item of artistSignals) {
+            if (!isSensibleArtistName(item.artist)) continue;
             const key = normalizeArtistName(item.artist);
             if (!seen.has(key)) {
               seen.add(key);

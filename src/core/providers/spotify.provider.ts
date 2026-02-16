@@ -4,7 +4,7 @@ const TOKEN_URL = "https://accounts.spotify.com/api/token";
 const API_URL = "https://api.spotify.com/v1";
 
 const spotifyRateLimiter = new ApiRateLimiter(
-  Number(process.env.SPOTIFY_RATE_LIMIT_MS) || 100,
+  Number(process.env.SPOTIFY_RATE_LIMIT_MS) || 250,
 );
 
 interface SpotifyToken {
@@ -64,40 +64,40 @@ async function getAccessToken(): Promise<string> {
   }
 }
 
-async function fetchSpotifyAPI(endpoint: string): Promise<any> {
+const SPOTIFY_429_RETRY_MS = Number(process.env.SPOTIFY_429_RETRY_MS) || 2000;
+
+async function fetchSpotifyAPI(endpoint: string, retried = false): Promise<any> {
   await spotifyRateLimiter.wait();
 
   const token = await getAccessToken();
-  
+
   if (!token || token.length === 0) {
     throw new Error("Spotify access token is empty");
   }
 
   const url = `${API_URL}${endpoint}`;
 
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
 
-    if (!res.ok) {
-      const errorText = await res.text().catch(() => "Unknown error");
-      throw new Error(
-        `Spotify API error: ${res.status} ${res.statusText}. ${errorText}`,
-      );
-    }
-
-    return res.json();
-  } catch (err) {
-    if (err instanceof Error) {
-      throw err;
-    }
-    throw new Error(`Spotify API request failed: ${String(err)}`);
+  if (res.status === 429 && !retried) {
+    await new Promise((r) => setTimeout(r, SPOTIFY_429_RETRY_MS));
+    return fetchSpotifyAPI(endpoint, true);
   }
+
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => "Unknown error");
+    throw new Error(
+      `Spotify API error: ${res.status} ${res.statusText}. ${errorText}`,
+    );
+  }
+
+  return res.json();
 }
 
 export interface SpotifyArtist {

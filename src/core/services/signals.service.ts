@@ -1,4 +1,5 @@
 import {
+  searchArtist,
   getSimilarArtists,
   getArtistTopTags,
 } from "../providers/lastfm.provider";
@@ -11,9 +12,13 @@ export async function collectSignalsForArtist(
   artist: string,
   apiKeys: { lastfm: string },
 ): Promise<MusicSignal[]> {
+  const resolved = await searchArtist(artist, apiKeys.lastfm);
+  const canonicalName = resolved?.name ?? artist.trim();
+  const mbid = resolved?.mbid ?? null;
+
   const [similar, lastfmTags] = await Promise.all([
-    getSimilarArtists(artist, apiKeys.lastfm),
-    getArtistTopTags(artist, apiKeys.lastfm),
+    getSimilarArtists(canonicalName, apiKeys.lastfm, { mbid }),
+    getArtistTopTags(canonicalName, apiKeys.lastfm),
   ]);
 
   const mbTags = await getMusicBrainzTags(artist).catch(() => {
