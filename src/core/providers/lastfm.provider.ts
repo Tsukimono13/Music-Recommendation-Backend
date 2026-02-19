@@ -30,13 +30,13 @@ async function fetchLastFM(params: URLSearchParams) {
   }
 }
 
-export async function searchArtist(
-  artist: string,
+async function searchArtistOnce(
+  artistQuery: string,
   apiKey: string,
 ): Promise<{ name: string; mbid: string | null } | null> {
   const params = new URLSearchParams({
     method: "artist.search",
-    artist: artist.trim(),
+    artist: artistQuery,
     api_key: apiKey,
     format: "json",
     limit: "5",
@@ -52,6 +52,22 @@ export async function searchArtist(
   if (!name) return null;
 
   return { name, mbid };
+}
+
+/** Resolve artist; if name contains "+" and search finds nothing, retry with " + " (spaces) — Last.fm often stores "Ost + Front". */
+export async function searchArtist(
+  artist: string,
+  apiKey: string,
+): Promise<{ name: string; mbid: string | null } | null> {
+  const trimmed = artist.trim();
+  let result = await searchArtistOnce(trimmed, apiKey);
+  if (!result && trimmed.includes("+")) {
+    const withSpaces = trimmed.replace(/\s*\+\s*/g, " + ");
+    if (withSpaces !== trimmed) {
+      result = await searchArtistOnce(withSpaces, apiKey);
+    }
+  }
+  return result;
 }
 
 import { isSensibleArtistName } from "../utils/normalize";

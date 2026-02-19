@@ -24,7 +24,7 @@ function normalize(
   }
 
   const allowedChars = allowUnicodeLetters
-    ? /[^\p{L}\p{N}\s\-']/gu
+    ? /[^\p{L}\p{N}\s\-'+]/gu
     : allowApostrophe
       ? /[^\w\s'-]/g
       : /[^\w\s-]/g;
