@@ -27,3 +27,7 @@ export class ApiRateLimiter {
 export const musicBrainzRateLimiter = new ApiRateLimiter(
   Number(process.env.MUSICBRAINZ_RATE_LIMIT_MS) || 1000,
 );
+
+export const lastfmRateLimiter = new ApiRateLimiter(
+  Number(process.env.LASTFM_RATE_LIMIT_MS) || 500,
+);

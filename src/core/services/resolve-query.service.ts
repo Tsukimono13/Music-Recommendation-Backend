@@ -34,14 +34,23 @@ function normalizeToPercent(
 async function enrichArtistsWithSpotifyUrls(
   artists: { artist: string; score: number }[],
 ): Promise<{ enriched: { artist: string; score: number; spotifyUrl?: string }[] }> {
-  if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
+  const hasId = Boolean(process.env.SPOTIFY_CLIENT_ID);
+  const hasSecret = Boolean(process.env.SPOTIFY_CLIENT_SECRET);
+
+  if (!hasId || !hasSecret) {
+    console.warn(
+      "[Spotify] Enrichment skipped: SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET not set. Set both in env to get artist links.",
+    );
     return {
       enriched: artists.map((a) => ({ ...a })),
     };
   }
 
-  const enriched = await Promise.all(
-    artists.map(async (item) => {
+  const maxToEnrich = Number(process.env.SPOTIFY_MAX_ARTISTS_TO_ENRICH) || 20;
+  const toEnrich = artists.slice(0, maxToEnrich);
+
+  const enrichedSlice = await Promise.all(
+    toEnrich.map(async (item) => {
       if (!item.artist?.trim()) return { ...item };
       try {
         const spotifyArtist = await searchArtist(item.artist);
@@ -59,6 +68,16 @@ async function enrichArtistsWithSpotifyUrls(
       return { ...item };
     }),
   );
+
+  const rest = artists.slice(maxToEnrich).map((a) => ({ ...a }));
+  const enriched = [...enrichedSlice, ...rest];
+
+  const withUrl = enriched.filter((a) => "spotifyUrl" in a && !!a.spotifyUrl).length;
+  if (artists.length > 0 && withUrl === 0) {
+    console.warn(
+      `[Spotify] No links found for ${artists.length} artists. Check rate limit (429), credentials, or artist name format.`,
+    );
+  }
 
   return { enriched };
 }

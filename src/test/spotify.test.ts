@@ -1,48 +1,49 @@
 import "dotenv/config";
-import {
-  searchArtist,
-  getArtistById,
-} from "../core/providers/spotify.provider";
+import { resolveQuery } from "../core/services/resolve-query.service";
+
+const hasLastFm = Boolean(process.env.LASTFM_API_KEY);
+const hasSpotify = Boolean(
+  process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET,
+);
+
+/** Группа для проверки — можно поменять. */
+const TEST_ARTIST = process.env.SPOTIFY_TEST_ARTIST || "Metallica";
 
 (async () => {
-  console.log("=== SPOTIFY API TEST ===\n");
+  console.log("=== Тест: запрос рекомендаций для одной группы ===\n");
+  console.log(`Группа: "${TEST_ARTIST}"`);
+  console.log(`Last.fm: ${hasLastFm ? "✓" : "✗ (нужен LASTFM_API_KEY)"}`);
+  console.log(`Spotify: ${hasSpotify ? "✓" : "✗ (ссылок не будет)"}\n`);
 
-  if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
-    console.error(
-      "❌ SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set in .env",
-    );
+  if (!hasLastFm) {
+    console.error("Задайте LASTFM_API_KEY в .env для теста.");
     process.exit(1);
   }
 
-  const testArtists = ["Metallica", "The Beatles", "Radiohead"];
+  const result = await resolveQuery(
+    { artists: [TEST_ARTIST] },
+    process.env.LASTFM_API_KEY!,
+  );
 
-  for (const artistName of testArtists) {
-    console.log(`\n🎵 ${artistName}`);
-
-    // Поиск артиста
-    const artist = await searchArtist(artistName);
-    if (!artist) {
-      console.log("  ❌ Artist not found\n");
-      continue;
-    }
-
-    console.log(`  ✅ Found: ${artist.name} (ID: ${artist.id})`);
-
-    // Получение артиста по ID
-    console.log(`\n  📋 Getting artist data by ID...`);
-    try {
-      const artistData = await getArtistById(artist.id);
-      console.log(`  ✅ Artist data received:`);
-      console.log(`     Name: ${artistData.name}`);
-      console.log(`     ID: ${artistData.id}`);
-      console.log(`     Spotify URL: ${artistData.external_urls?.spotify || "N/A"}`);
-      console.log(`     Images: ${artistData.images?.length || 0} available`);
-    } catch (err) {
-      console.log(`  ❌ Failed to get artist data: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 200));
+  console.log("--- Результат ---");
+  console.log(`Артистов: ${result.artists.length}`);
+  if (result.tags?.length) {
+    console.log(`Теги: ${result.tags.slice(0, 8).join(", ")}`);
   }
 
-  console.log("\n✅ Test completed");
+  const withUrl = result.artists.filter((a) => "spotifyUrl" in a && a.spotifyUrl);
+  console.log(`Со ссылкой Spotify: ${withUrl.length}/${result.artists.length}\n`);
+
+  console.log("Топ-10:");
+  result.artists.slice(0, 10).forEach((a, i) => {
+    const link = "spotifyUrl" in a && a.spotifyUrl ? "✅" : "—";
+    console.log(`  ${i + 1}. ${a.artist} — ${a.score}% ${link}`);
+  });
+
+  if (result.artists.length === 0) {
+    console.error("\n❌ Нет артистов в ответе.");
+    process.exit(1);
+  }
+
+  console.log("\n✅ Запрос отработал.");
 })();

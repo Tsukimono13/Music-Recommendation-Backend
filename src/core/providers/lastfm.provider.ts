@@ -1,3 +1,5 @@
+import { lastfmRateLimiter } from "../utils/api-rate-limiter";
+
 const API_URL = "https://ws.audioscrobbler.com/2.0/";
 
 const USER_AGENT =
@@ -8,7 +10,29 @@ const HEADERS = {
   "User-Agent": USER_AGENT,
 };
 
-async function fetchLastFM(params: URLSearchParams) {
+/** TTL кэша Last.fm (ответы по одному и тому же запросу не дергают API). */
+const LASTFM_CACHE_TTL_MS = Number(process.env.LASTFM_CACHE_TTL_MS) || 24 * 60 * 60 * 1000;
+
+const lastfmResponseCache = new Map<
+  string,
+  { data: any; cachedAt: number }
+>();
+
+function lastfmCacheKey(params: URLSearchParams): string {
+  const entries = Array.from(params.entries())
+    .filter(([k]) => k !== "api_key")
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  return entries.map(([k, v]) => `${k}=${v}`).join("&");
+}
+
+async function fetchLastFM(params: URLSearchParams): Promise<any> {
+  const key = lastfmCacheKey(params);
+  const cached = lastfmResponseCache.get(key);
+  if (cached && Date.now() - cached.cachedAt < LASTFM_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  await lastfmRateLimiter.wait();
   try {
     const res = await fetch(`${API_URL}?${params.toString()}`, {
       headers: HEADERS,
@@ -21,7 +45,9 @@ async function fetchLastFM(params: URLSearchParams) {
       );
     }
 
-    return res.json();
+    const data = await res.json();
+    lastfmResponseCache.set(key, { data, cachedAt: Date.now() });
+    return data;
   } catch (err) {
     if (err instanceof Error) {
       throw err;

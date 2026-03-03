@@ -5,7 +5,10 @@ import { apiRateLimiter } from "./middleware/rate-limit.middleware";
 
 export function registerRoutes(app: Express) {
   app.get("/health", (_, res) => {
-    res.json({ ok: true });
+    const spotifyConfigured =
+      Boolean(process.env.SPOTIFY_CLIENT_ID) &&
+      Boolean(process.env.SPOTIFY_CLIENT_SECRET);
+    res.json({ ok: true, spotifyConfigured });
   });
 
   app.post(
