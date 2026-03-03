@@ -11,6 +11,8 @@ export interface QueryResult {
   artists: { artist: string; score: number; spotifyUrl?: string }[];
   tags?: string[];
   fallbackArtists?: { artist: string; score: number; spotifyUrl?: string }[];
+  /** Пояснение при пустом пересечении: почему отдали fallbackArtists. */
+  fallbackReason?: string;
   notFoundArtists?: string[];
   notFoundTags?: string[];
 }
@@ -138,6 +140,8 @@ export async function resolveQuery(
 
       // Если нет пересечений, возвращаем пустой artists и fallbackArtists
       if (intersection.length === 0) {
+        const fallbackReason =
+          "Нет артистов, похожих на всех указанных сразу. Показаны топ похожих по каждому артисту.";
         const fallbackArtists: { artist: string; score: number }[] = [];
         const seen = new Set<string>();
 
@@ -168,6 +172,7 @@ export async function resolveQuery(
           artists: [],
           tags: tags.length > 0 ? tags : undefined,
           fallbackArtists: enrichedFallback,
+          fallbackReason,
         };
       }
 
@@ -195,6 +200,7 @@ export async function resolveQuery(
 
       return {
         artists: enriched,
+        notFoundTags: result.notFoundTags.length > 0 ? result.notFoundTags : undefined,
       };
     }
 

@@ -33,11 +33,12 @@ export async function buildRecommendations(
     scoreMap.set(key, (scoreMap.get(key) ?? 0) + s.weight);
   }
 
+  const limit = Math.min(100, Math.max(10, Number(process.env.RECOMMEND_ARTISTS_LIMIT) || 30));
   const artists = [...scoreMap.entries()]
     .filter(([artist]) => isSensibleArtistName(artist))
     .map(([artist, score]) => ({ artist, score }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 30);
+    .slice(0, limit);
 
   return {
     artists,

@@ -46,6 +46,13 @@ export function registerRoutes(app: Express) {
         }
       } else {
         input = { artists: body.artists, tags: body.tags };
+        const hasArtists = Array.isArray(input.artists) && input.artists.some((a) => typeof a === "string" && a.trim());
+        const hasTags = Array.isArray(input.tags) && input.tags.some((t) => typeof t === "string" && t.trim());
+        if (!hasArtists && !hasTags) {
+          return res.status(400).json({
+            error: "Provide either message or artists/tags",
+          });
+        }
       }
 
       const result = await resolveQuery(input, lastFmKey);

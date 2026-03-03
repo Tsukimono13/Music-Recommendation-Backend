@@ -2,8 +2,8 @@ import rateLimit from "express-rate-limit";
 
 export const generalRateLimiter = rateLimit({
   windowMs:
-    Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 минут
-  max: Number(process.env.RATE_LIMIT_MAX) || 100, // 100 запросов за окно
+    Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, 
+  max: Number(process.env.RATE_LIMIT_MAX) || 100, 
   message: {
     error: "Too many requests from this IP, please try again later.",
   },
@@ -14,8 +14,8 @@ export const generalRateLimiter = rateLimit({
 
 export const apiRateLimiter = rateLimit({
   windowMs:
-    Number(process.env.API_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 минут
-  max: Number(process.env.API_RATE_LIMIT_MAX) || 20, // 20 запросов за окно
+    Number(process.env.API_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, 
+  max: Number(process.env.API_RATE_LIMIT_MAX) || 20, 
   message: {
     error: "Too many API requests from this IP, please try again later.",
   },
