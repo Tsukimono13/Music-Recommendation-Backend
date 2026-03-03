@@ -1,5 +1,6 @@
 import { Express, Request, Response } from "express";
 import { resolveQuery } from "../core/services/resolve-query.service";
+import { parseRecommendationQuery } from "../core/services/query-from-message.service";
 import { asyncHandler } from "./middleware/error-handler.middleware";
 import { apiRateLimiter } from "./middleware/rate-limit.middleware";
 
@@ -8,21 +9,46 @@ export function registerRoutes(app: Express) {
     const spotifyConfigured =
       Boolean(process.env.SPOTIFY_CLIENT_ID) &&
       Boolean(process.env.SPOTIFY_CLIENT_SECRET);
-    res.json({ ok: true, spotifyConfigured });
+    const geminiConfigured = Boolean(
+      process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY,
+    );
+    res.json({
+      ok: true,
+      spotifyConfigured,
+      geminiConfigured,
+    });
   });
 
   app.post(
     "/api/music/recommend",
     apiRateLimiter,
     asyncHandler(async (req: Request, res: Response) => {
-      const input = req.body; // { artists?: string[], tags?: string[] }
-      const apiKey = process.env.LASTFM_API_KEY;
+      const body = req.body as { artists?: string[]; tags?: string[]; message?: string };
+      const lastFmKey = process.env.LASTFM_API_KEY;
 
-      if (!apiKey) {
+      if (!lastFmKey) {
         throw new Error("LASTFM_API_KEY is not configured");
       }
 
-      const result = await resolveQuery(input, apiKey);
+      let input: { artists?: string[]; tags?: string[] };
+
+      if (typeof body.message === "string" && body.message.trim()) {
+        const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+        if (!geminiKey) {
+          throw new Error("GEMINI_API_KEY (or GOOGLE_AI_API_KEY) is required for message-based recommendations");
+        }
+        input = await parseRecommendationQuery(body.message.trim(), geminiKey);
+        if (!input.artists?.length && !input.tags?.length) {
+          return res.status(400).json({
+            error: "Could not extract artists or tags from the message",
+            parsed: input,
+          });
+        }
+      } else {
+        input = { artists: body.artists, tags: body.tags };
+      }
+
+      const result = await resolveQuery(input, lastFmKey);
       res.json(result);
     }),
   );
