@@ -228,9 +228,9 @@ export async function searchArtist(artistName: string): Promise<SpotifyArtist | 
       popularity: first.popularity || 0,
     };
   } catch (err) {
-    console.warn(
-      `[Spotify] Search failed for artist: ${artistName}. ${err instanceof Error ? err.message : String(err)}`,
-    );
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Spotify] Search failed for artist: ${artistName}. ${msg}`);
+    if (msg.includes("403")) throw err;
     return null;
   }
 }

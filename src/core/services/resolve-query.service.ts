@@ -11,7 +11,6 @@ export interface QueryResult {
   artists: { artist: string; score: number; spotifyUrl?: string }[];
   tags?: string[];
   fallbackArtists?: { artist: string; score: number; spotifyUrl?: string }[];
-  /** Пояснение при пустом пересечении: почему отдали fallbackArtists. */
   fallbackReason?: string;
   notFoundArtists?: string[];
   notFoundTags?: string[];
@@ -48,31 +47,59 @@ async function enrichArtistsWithSpotifyUrls(
     };
   }
 
-  const maxToEnrich = Number(process.env.SPOTIFY_MAX_ARTISTS_TO_ENRICH) || 20;
+  const skipEnrichment =
+    process.env.SPOTIFY_SKIP_ENRICHMENT === "1" ||
+    process.env.SPOTIFY_SKIP_ENRICHMENT === "true";
+  if (skipEnrichment) {
+    return { enriched: artists.map((a) => ({ ...a })) };
+  }
+
+  const maxToEnrich = Number(process.env.SPOTIFY_MAX_ARTISTS_TO_ENRICH) || 100;
   const toEnrich = artists.slice(0, maxToEnrich);
+  const enriched: { artist: string; score: number; spotifyUrl?: string }[] = artists.map((a) => ({ ...a }));
 
-  const enrichedSlice = await Promise.all(
-    toEnrich.map(async (item) => {
-      if (!item.artist?.trim()) return { ...item };
-      try {
-        const spotifyArtist = await searchArtist(item.artist);
-        if (spotifyArtist) {
-          return {
-            ...item,
-            spotifyUrl: `https://open.spotify.com/artist/${spotifyArtist.id}`,
-          };
-        }
-      } catch (err) {
-        console.warn(
-          `[Spotify] Failed to find artist "${item.artist}": ${err instanceof Error ? err.message : String(err)}`,
-        );
+  if (toEnrich.length === 0) {
+    return { enriched };
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = 0;
+    let resolved = false;
+    const maybeDone = () => {
+      if (resolved) return;
+      resolved = true;
+      resolve();
+    };
+    toEnrich.forEach((item, i) => {
+      if (!item.artist?.trim()) {
+        settled++;
+        if (settled === toEnrich.length) maybeDone();
+        return;
       }
-      return { ...item };
-    }),
-  );
-
-  const rest = artists.slice(maxToEnrich).map((a) => ({ ...a }));
-  const enriched = [...enrichedSlice, ...rest];
+      searchArtist(item.artist)
+        .then((spotifyArtist) => {
+          if (resolved) return;
+          if (spotifyArtist) {
+            enriched[i].spotifyUrl = `https://open.spotify.com/artist/${spotifyArtist.id}`;
+          }
+          settled++;
+          if (settled === toEnrich.length) maybeDone();
+        })
+        .catch((err) => {
+          if (resolved) return;
+          const is403 = err instanceof Error && err.message.includes("403");
+          if (is403) {
+            maybeDone();
+            return;
+          }
+          console.warn(
+            `[Spotify] Failed to find artist "${item.artist}": ${err instanceof Error ? err.message : String(err)}`,
+          );
+          settled++;
+          if (settled === toEnrich.length) maybeDone();
+        });
+    });
+  });
 
   const withUrl = enriched.filter((a) => "spotifyUrl" in a && !!a.spotifyUrl).length;
   if (artists.length > 0 && withUrl === 0) {

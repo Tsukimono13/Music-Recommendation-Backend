@@ -16,15 +16,14 @@ export async function collectSignalsForArtist(
   const canonicalName = resolved?.name ?? artist.trim();
   const mbid = resolved?.mbid ?? null;
 
-  const [similar, lastfmTags] = await Promise.all([
+  const [similar, lastfmTags, mbTags] = await Promise.all([
     getSimilarArtists(canonicalName, apiKeys.lastfm, { mbid }),
     getArtistTopTags(canonicalName, apiKeys.lastfm),
+    getMusicBrainzTags(artist).catch(() => {
+      console.warn(`[Signals] MusicBrainz failed for ${artist}, continuing without MB tags`);
+      return [];
+    }),
   ]);
-
-  const mbTags = await getMusicBrainzTags(artist).catch(() => {
-    console.warn(`[Signals] MusicBrainz failed for ${artist}, continuing without MB tags`);
-    return [];
-  });
 
   const signals: MusicSignal[] = [];
 
