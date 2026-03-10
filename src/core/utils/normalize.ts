@@ -63,3 +63,18 @@ export function isSensibleArtistName(name: string): boolean {
 export function normalizeTag(value: string): string {
   return normalize(value, { allowApostrophe: false, normalizeQuotes: false });
 }
+
+/**
+ * Нормализация имени артиста для ответа и для поиска в Spotify:
+ * убирает лишние пробелы, приводит "and the" / "And The" и двойной пробел перед "the" к единому виду " & the ".
+ * Примеры: "Marilyn Manson  The Spooky Kids" → "Marilyn Manson & the Spooky Kids";
+ *           "Marilyn Manson And The Spooky Kids" → "Marilyn Manson & the Spooky Kids".
+ */
+export function normalizeArtistDisplayName(name: string): string {
+  if (!name?.trim()) return name;
+  let s = name.trim();
+  s = s.replace(/\s{2,}the\s+/gi, " & the ");
+  s = s.replace(/\s+and\s+the\s+/gi, " & the ");
+  s = s.replace(/\s{2,}/g, " ");
+  return s.trim();
+}

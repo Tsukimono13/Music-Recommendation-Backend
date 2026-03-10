@@ -4,7 +4,7 @@ import { collectSignalsForArtist } from "./signals.service";
 import { buildRecommendations } from "./recommend.service";
 import { intersectArtistSignals } from "./intersection.service";
 import { MusicSignal } from "../models/music-signal.model";
-import { normalizeTag, normalizeArtistName, isSensibleArtistName } from "../utils/normalize";
+import { normalizeTag, normalizeArtistName, normalizeArtistDisplayName, isSensibleArtistName } from "../utils/normalize";
 import { searchArtist } from "../providers/spotify.provider";
 
 export interface QueryResult {
@@ -25,7 +25,7 @@ function normalizeToPercent(
   if (maxScore === 0) return results;
 
   return results.map((item) => ({
-    artist: item.artist,
+    artist: normalizeArtistDisplayName(item.artist),
     score: Math.round((item.score / maxScore) * 100),
     spotifyUrl: item.spotifyUrl,
   }));
