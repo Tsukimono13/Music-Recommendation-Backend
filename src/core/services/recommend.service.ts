@@ -26,17 +26,22 @@ export async function buildRecommendations(
 
   const allArtists = [...artistSignals, ...expandedArtists];
 
-  const scoreMap = new Map<string, number>();
+  const keyToEntry = new Map<string, { score: number; displayName: string }>();
 
   for (const s of allArtists) {
     const key = normalizeArtistName(s.value);
-    scoreMap.set(key, (scoreMap.get(key) ?? 0) + s.weight);
+    const existing = keyToEntry.get(key);
+    if (existing) {
+      existing.score += s.weight;
+    } else {
+      keyToEntry.set(key, { score: s.weight, displayName: s.value });
+    }
   }
 
   const limit = Math.min(100, Math.max(10, Number(process.env.RECOMMEND_ARTISTS_LIMIT) || 30));
-  const artists = [...scoreMap.entries()]
-    .filter(([artist]) => isSensibleArtistName(artist))
-    .map(([artist, score]) => ({ artist, score }))
+  const artists = [...keyToEntry.entries()]
+    .filter(([key]) => isSensibleArtistName(key))
+    .map(([, entry]) => ({ artist: entry.displayName, score: entry.score }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 

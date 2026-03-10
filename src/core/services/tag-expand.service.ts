@@ -1,10 +1,31 @@
 import { MusicSignal } from "../models/music-signal.model";
 import { getTopArtistsByTag } from "../providers/lastfm.provider";
-import { normalizeArtistName } from "../utils/normalize";
 
 export interface TagExpandResult {
   signals: MusicSignal[];
   notFoundTags: string[];
+}
+
+const DECADE_WORDS = new Set(["70s", "80s", "90s", "2000s", "2010s"]);
+const MIN_ARTISTS_BEFORE_FALLBACK = 5;
+const FALLBACK_LIMIT = 50;
+
+function isEraGenreCompoundTag(tag: string): boolean {
+  const parts = tag.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return false;
+  const hasDecade = parts.some((p) => DECADE_WORDS.has(p));
+  return hasDecade;
+}
+
+function splitEraGenreTag(tag: string): [string, string] | null {
+  const parts = tag.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  const decadeIdx = parts.findIndex((p) => DECADE_WORDS.has(p.toLowerCase()));
+  if (decadeIdx < 0) return null;
+  const era = parts[decadeIdx];
+  const genre = parts.slice(0, decadeIdx).concat(parts.slice(decadeIdx + 1)).join(" ");
+  if (!genre) return null;
+  return [era, genre];
 }
 
 export async function expandTagsToArtistSignals(
@@ -21,8 +42,39 @@ export async function expandTagsToArtistSignals(
 
   const expandedResults = await Promise.all(
     Array.from(tagMap.entries()).map(async ([tagValue, tagWeight]) => {
-      const artists = await getTopArtistsByTag(tagValue, apiKey);
-      
+      let artists = await getTopArtistsByTag(tagValue, apiKey);
+
+      if (artists.length < MIN_ARTISTS_BEFORE_FALLBACK && isEraGenreCompoundTag(tagValue)) {
+        const split = splitEraGenreTag(tagValue);
+        if (split) {
+          const [era, genre] = split;
+          const [eraArtists, genreArtists] = await Promise.all([
+            getTopArtistsByTag(era, apiKey, FALLBACK_LIMIT),
+            getTopArtistsByTag(genre, apiKey, FALLBACK_LIMIT),
+          ]);
+          if (eraArtists.length > 0 || genreArtists.length > 0) {
+            const signals: MusicSignal[] = [];
+            for (const a of eraArtists) {
+              signals.push({
+                kind: "artist",
+                source: "lastfm",
+                value: a.name,
+                weight: tagWeight * (1 / a.rank),
+              });
+            }
+            for (const a of genreArtists) {
+              signals.push({
+                kind: "artist",
+                source: "lastfm",
+                value: a.name,
+                weight: tagWeight * (1 / a.rank),
+              });
+            }
+            return signals;
+          }
+        }
+      }
+
       if (artists.length === 0) {
         notFoundTags.push(tagValue);
         return [];
