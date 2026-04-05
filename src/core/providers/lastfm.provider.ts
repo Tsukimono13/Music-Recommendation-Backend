@@ -1,4 +1,8 @@
 import { lastfmRateLimiter } from "../utils/api-rate-limiter";
+import { TimedCache } from "../utils/timed-cache";
+import { fetchWithTimeout } from "../utils/fetch-with-timeout";
+import { isSensibleArtistName } from "../utils/normalize";
+import { HttpError } from "../utils/http-error";
 
 const API_URL = "https://ws.audioscrobbler.com/2.0/";
 
@@ -10,13 +14,10 @@ const HEADERS = {
   "User-Agent": USER_AGENT,
 };
 
-/** TTL кэша Last.fm (ответы по одному и тому же запросу не дергают API). */
 const LASTFM_CACHE_TTL_MS = Number(process.env.LASTFM_CACHE_TTL_MS) || 24 * 60 * 60 * 1000;
+const LASTFM_TIMEOUT_MS = Number(process.env.LASTFM_TIMEOUT_MS) || 10_000;
 
-const lastfmResponseCache = new Map<
-  string,
-  { data: any; cachedAt: number }
->();
+const responseCache = new TimedCache<any>(LASTFM_CACHE_TTL_MS);
 
 function lastfmCacheKey(params: URLSearchParams): string {
   const entries = Array.from(params.entries())
@@ -27,36 +28,30 @@ function lastfmCacheKey(params: URLSearchParams): string {
 
 async function fetchLastFM(params: URLSearchParams): Promise<any> {
   const key = lastfmCacheKey(params);
-  const cached = lastfmResponseCache.get(key);
-  if (cached && Date.now() - cached.cachedAt < LASTFM_CACHE_TTL_MS) {
-    return cached.data;
-  }
+  const cached = responseCache.get(key);
+  if (cached) return cached;
 
   await lastfmRateLimiter.wait();
-  try {
-    const res = await fetch(`${API_URL}?${params.toString()}`, {
-      headers: HEADERS,
-    });
 
-    if (!res.ok) {
-      const errorText = await res.text().catch(() => "Unknown error");
-      throw new Error(
-        `Last.fm API error: ${res.status} ${res.statusText}. ${errorText}`,
-      );
-    }
+  const res = await fetchWithTimeout(`${API_URL}?${params.toString()}`, {
+    headers: HEADERS,
+    timeoutMs: LASTFM_TIMEOUT_MS,
+  });
 
-    const data = await res.json();
-    lastfmResponseCache.set(key, { data, cachedAt: Date.now() });
-    return data;
-  } catch (err) {
-    if (err instanceof Error) {
-      throw err;
-    }
-    throw new Error(`Last.fm request failed: ${String(err)}`);
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => "Unknown error");
+    throw new HttpError(
+      res.status,
+      `Last.fm API error: ${res.status} ${res.statusText}. ${errorText}`,
+    );
   }
+
+  const data = await res.json();
+  responseCache.set(key, data);
+  return data;
 }
 
-async function searchArtistOnce(
+async function searchLastfmArtistOnce(
   artistQuery: string,
   apiKey: string,
 ): Promise<{ name: string; mbid: string | null } | null> {
@@ -80,23 +75,20 @@ async function searchArtistOnce(
   return { name, mbid };
 }
 
-/** Resolve artist; if name contains "+" and search finds nothing, retry with " + " (spaces) — Last.fm often stores "Ost + Front". */
-export async function searchArtist(
+export async function searchLastfmArtist(
   artist: string,
   apiKey: string,
 ): Promise<{ name: string; mbid: string | null } | null> {
   const trimmed = artist.trim();
-  let result = await searchArtistOnce(trimmed, apiKey);
+  let result = await searchLastfmArtistOnce(trimmed, apiKey);
   if (!result && trimmed.includes("+")) {
     const withSpaces = trimmed.replace(/\s*\+\s*/g, " + ");
     if (withSpaces !== trimmed) {
-      result = await searchArtistOnce(withSpaces, apiKey);
+      result = await searchLastfmArtistOnce(withSpaces, apiKey);
     }
   }
   return result;
 }
-
-import { isSensibleArtistName } from "../utils/normalize";
 
 export async function getSimilarArtists(
   artist: string,

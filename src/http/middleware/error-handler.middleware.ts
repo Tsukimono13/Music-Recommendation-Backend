@@ -1,30 +1,16 @@
 import { Request, Response, NextFunction } from "express";
-
-export interface AppError extends Error {
-  statusCode?: number;
-  isOperational?: boolean;
-}
+import { HttpError } from "../../core/utils/http-error";
 
 export function errorHandler(
-  err: AppError | Error,
+  err: Error,
   req: Request,
   res: Response,
   next: NextFunction,
 ) {
   const timestamp = new Date().toISOString();
-  let statusCode = (err as AppError).statusCode || 500;
-  const isOperational = (err as AppError).isOperational || false;
 
-
-  if (err.message.includes("503") || err.message.includes("Service Temporarily Unavailable")) {
-    statusCode = 503;
-  } else if (err.message.includes("429") || err.message.includes("Too Many Requests")) {
-    statusCode = 429;
-  } else if (err.message.includes("401") || err.message.includes("Unauthorized")) {
-    statusCode = 401;
-  } else if (err.message.includes("404") || err.message.includes("Not Found")) {
-    statusCode = 404;
-  }
+  const statusCode = err instanceof HttpError ? err.statusCode : 500;
+  const isOperational = err instanceof HttpError ? err.isOperational : false;
 
   console.error(`[${timestamp}] ERROR ${req.method} ${req.path}:`, {
     message: err.message,

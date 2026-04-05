@@ -29,5 +29,5 @@ export const musicBrainzRateLimiter = new ApiRateLimiter(
 );
 
 export const lastfmRateLimiter = new ApiRateLimiter(
-  Number(process.env.LASTFM_RATE_LIMIT_MS) || 500,
+  Number(process.env.LASTFM_RATE_LIMIT_MS) || 200,
 );

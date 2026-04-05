@@ -52,17 +52,37 @@ export async function expandTagsToArtistSignals(
             getTopArtistsByTag(era, apiKey, FALLBACK_LIMIT),
             getTopArtistsByTag(genre, apiKey, FALLBACK_LIMIT),
           ]);
-          if (eraArtists.length > 0 || genreArtists.length > 0) {
+          if (eraArtists.length > 0 && genreArtists.length > 0) {
+            // Пересекаем: только артисты, присутствующие в обоих списках
+            const genreSet = new Map<string, { name: string; rank: number }>();
+            for (const a of genreArtists) {
+              genreSet.set(a.name.toLowerCase(), a);
+            }
+
             const signals: MusicSignal[] = [];
             for (const a of eraArtists) {
-              signals.push({
-                kind: "artist",
-                source: "lastfm",
-                value: a.name,
-                weight: tagWeight * (1 / a.rank),
-              });
+              const genreMatch = genreSet.get(a.name.toLowerCase());
+              if (genreMatch) {
+                // Артист есть в обоих списках — берём, вес = среднее из двух рангов
+                const combinedWeight = tagWeight * (1 / a.rank + 1 / genreMatch.rank) / 2;
+                signals.push({
+                  kind: "artist",
+                  source: "lastfm",
+                  value: a.name,
+                  weight: combinedWeight,
+                });
+              }
             }
-            for (const a of genreArtists) {
+
+            if (signals.length > 0) {
+              return signals;
+            }
+            // Если пересечение пустое — fallback на union (лучше что-то, чем ничего)
+          }
+
+          if (eraArtists.length > 0 || genreArtists.length > 0) {
+            const signals: MusicSignal[] = [];
+            for (const a of [...eraArtists, ...genreArtists]) {
               signals.push({
                 kind: "artist",
                 source: "lastfm",

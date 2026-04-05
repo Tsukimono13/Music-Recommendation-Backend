@@ -5,6 +5,19 @@ import { asyncHandler } from "./middleware/error-handler.middleware";
 import { apiRateLimiter } from "./middleware/rate-limit.middleware";
 
 export function registerRoutes(app: Express) {
+  // Timing middleware — добавляет X-Response-Time заголовок
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on("finish", () => {
+      const ms = Date.now() - start;
+      res.setHeader("X-Response-Time", `${ms}ms`);
+      if (ms > 5000) {
+        console.warn(`[Slow] ${req.method} ${req.path} took ${ms}ms`);
+      }
+    });
+    next();
+  });
+
   app.get("/health", (_, res) => {
     const spotifyConfigured =
       Boolean(process.env.SPOTIFY_CLIENT_ID) &&

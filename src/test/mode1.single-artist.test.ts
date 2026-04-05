@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { resolveQuery } from "../core/services/resolve-query.service";
-import { searchArtist, getSimilarArtists } from "../core/providers/lastfm.provider";
+import { searchLastfmArtist, getSimilarArtists } from "../core/providers/lastfm.provider";
 
 const apiKey = process.env.LASTFM_API_KEY!;
 
@@ -46,8 +46,8 @@ async function runSingleArtistTest(artistName: string) {
 
   // 1) Проверка разрешения артиста: "Ария" -> каноническое имя + MBID, похожие как на сайте
   console.log("1️⃣ Ария (кириллица) — ожидаем Кипелов, Эпидемия и т.п., без «-», «Zz»");
-  const resolved = await searchArtist("Ария", apiKey);
-  if (!resolved) throw new Error("searchArtist('Ария') не вернул артиста");
+  const resolved = await searchLastfmArtist("Ария", apiKey);
+  if (!resolved) throw new Error("searchLastfmArtist('Ария') не вернул артиста");
   console.log(`   Разрешённый артист: "${resolved.name}", mbid: ${resolved.mbid ?? "—"}`);
 
   const similarRaw = await getSimilarArtists(resolved.name, apiKey, { mbid: resolved.mbid });

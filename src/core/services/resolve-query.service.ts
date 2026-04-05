@@ -5,7 +5,7 @@ import { buildRecommendations } from "./recommend.service";
 import { intersectArtistSignals } from "./intersection.service";
 import { MusicSignal } from "../models/music-signal.model";
 import { normalizeTag, normalizeArtistName, normalizeArtistDisplayName, isSensibleArtistName } from "../utils/normalize";
-import { searchArtist } from "../providers/spotify.provider";
+import { searchSpotifyArtist } from "../providers/spotify.provider";
 
 export interface QueryResult {
   artists: { artist: string; score: number; spotifyUrl?: string }[];
@@ -32,6 +32,8 @@ function normalizeToPercent(
 }
 
 
+const ENRICHMENT_TIMEOUT_MS = Number(process.env.SPOTIFY_ENRICHMENT_TIMEOUT_MS) || 5_000;
+
 async function enrichArtistsWithSpotifyUrls(
   artists: { artist: string; score: number }[],
 ): Promise<{ enriched: { artist: string; score: number; spotifyUrl?: string }[] }> {
@@ -42,9 +44,7 @@ async function enrichArtistsWithSpotifyUrls(
     console.warn(
       "[Spotify] Enrichment skipped: SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET not set. Set both in env to get artist links.",
     );
-    return {
-      enriched: artists.map((a) => ({ ...a })),
-    };
+    return { enriched: artists.map((a) => ({ ...a })) };
   }
 
   const skipEnrichment =
@@ -62,46 +62,26 @@ async function enrichArtistsWithSpotifyUrls(
     return { enriched };
   }
 
-  await new Promise<void>((resolve) => {
-    let settled = 0;
-    let resolved = false;
-    const maybeDone = () => {
-      if (resolved) return;
-      resolved = true;
-      resolve();
-    };
-    toEnrich.forEach((item, i) => {
-      if (!item.artist?.trim()) {
-        settled++;
-        if (settled === toEnrich.length) maybeDone();
-        return;
-      }
-      searchArtist(item.artist)
-        .then((spotifyArtist) => {
-          if (resolved) return;
-          if (spotifyArtist) {
-            enriched[i].spotifyUrl = `https://open.spotify.com/artist/${spotifyArtist.id}`;
-          }
-          settled++;
-          if (settled === toEnrich.length) maybeDone();
-        })
-        .catch((err) => {
-          if (resolved) return;
-          const is403 = err instanceof Error && err.message.includes("403");
-          if (is403) {
-            maybeDone();
-            return;
-          }
-          console.warn(
-            `[Spotify] Failed to find artist "${item.artist}": ${err instanceof Error ? err.message : String(err)}`,
-          );
-          settled++;
-          if (settled === toEnrich.length) maybeDone();
-        });
-    });
-  });
+  const timeout = new Promise<"timeout">((resolve) =>
+    setTimeout(() => resolve("timeout"), ENRICHMENT_TIMEOUT_MS),
+  );
 
-  const withUrl = enriched.filter((a) => "spotifyUrl" in a && !!a.spotifyUrl).length;
+  const lookups = Promise.allSettled(
+    toEnrich.map(async (item, i) => {
+      if (!item.artist?.trim()) return;
+      const spotifyArtist = await searchSpotifyArtist(item.artist);
+      if (spotifyArtist) {
+        enriched[i].spotifyUrl = `https://open.spotify.com/artist/${spotifyArtist.id}`;
+      }
+    }),
+  );
+
+  const result = await Promise.race([lookups, timeout]);
+  if (result === "timeout") {
+    console.warn(`[Spotify] Enrichment timed out after ${ENRICHMENT_TIMEOUT_MS}ms`);
+  }
+
+  const withUrl = enriched.filter((a) => a.spotifyUrl).length;
   if (artists.length > 0 && withUrl === 0) {
     console.warn(
       `[Spotify] No links found for ${artists.length} artists. Check rate limit (429), credentials, or artist name format.`,
@@ -125,6 +105,15 @@ function extractUniqueTags(signals: MusicSignal[]): string[] {
   return Array.from(tagSet).sort();
 }
 
+function excludeInputArtists(
+  results: { artist: string; score: number; spotifyUrl?: string }[],
+  inputArtists: string[],
+): { artist: string; score: number; spotifyUrl?: string }[] {
+  if (inputArtists.length === 0) return results;
+  const inputKeys = new Set(inputArtists.map((a) => normalizeArtistName(a)));
+  return results.filter((r) => !inputKeys.has(normalizeArtistName(r.artist)));
+}
+
 export async function resolveQuery(
   input: QueryInput,
   apiKey: string,
@@ -142,7 +131,8 @@ export async function resolveQuery(
       );
 
       const result = await buildRecommendations(artistSignals, apiKey);
-      const normalized = normalizeToPercent(result.artists);
+      const filtered = excludeInputArtists(result.artists, input.artists!);
+      const normalized = normalizeToPercent(filtered);
       const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 
       const tags = extractUniqueTags(signals);
@@ -192,7 +182,8 @@ export async function resolveQuery(
           }
         }
 
-        const normalizedFallback = normalizeToPercent(fallbackArtists);
+        const filteredFallback = excludeInputArtists(fallbackArtists, input.artists!);
+        const normalizedFallback = normalizeToPercent(filteredFallback);
         const { enriched: enrichedFallback } = await enrichArtistsWithSpotifyUrls(normalizedFallback);
 
         return {
@@ -204,7 +195,8 @@ export async function resolveQuery(
       }
 
       // Если есть пересечения, возвращаем их
-      const normalized = normalizeToPercent(intersection);
+      const filtered = excludeInputArtists(intersection, input.artists!);
+      const normalized = normalizeToPercent(filtered);
       const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 
       return {
@@ -274,7 +266,8 @@ export async function resolveQuery(
         apiKey,
       );
 
-      const normalized = normalizeToPercent(result.artists);
+      const filtered = excludeInputArtists(result.artists, input.artists!);
+      const normalized = normalizeToPercent(filtered);
       const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 
       const allTags = [

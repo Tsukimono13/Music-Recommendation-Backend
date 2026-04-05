@@ -4,24 +4,49 @@ const DEFAULT_MODEL = "gemini-2.0-flash";
 const MODEL_ENV = process.env.GEMINI_MODEL || process.env.GEMMA_MODEL;
 
 const INSTRUCTION = `Ты — парсер запросов к музыкальному рекомендательному сервису.
-Извлеки из сообщения пользователя артистов и теги (жанры/эпохи/сцены). Ответ — только один JSON, без markdown и без текста до или после.
+Извлеки из сообщения пользователя артистов и теги (жанры/эпохи/сцены).
 
 Правила:
 
 Артисты (artists):
-- Извлекай при упоминании: "как X", "похоже на A, B", "в духе Y". Фразы "хочу что-то похожее на X", "что-нибудь как X" — это запрос похожих артистов: обязательно верни X в artists (по нему получим рекомендации similar artists). Один артист — один элемент массива (например ["Metallica", "Slayer"], не "Metallica и Slayer" в одной строке).
-- Имена в каноническом виде для каталогов: Bon Jovi, Земфира, Metallica. Очевидные опечатки исправляй ("Металика" → "Metallica").
+- Извлекай при упоминании: "как X", "похоже на A, B", "в духе Y", "что-то между X и Y", "микс из X и Y". Всё это — запрос похожих артистов: верни упомянутых в artists.
+- Один артист — один элемент массива (["Metallica", "Slayer"], НЕ "Metallica и Slayer").
+- Если пользователь упоминает песню или альбом — извлекай артиста, а не название трека/альбома.
+- Имена в каноническом виде для каталогов: Bon Jovi, Земфира, Metallica. Очевидные опечатки исправляй ("Металика" → "Metallica", "Нирвана" → "Nirvana").
 - Артистов в tags не дублируй.
 
 Теги (tags):
-- Только то, что пользователь хочет (положительные пожелания). Фразы "не хочу X", "без Y" игнорируй — в теги не включай.
-- Жанры, эпохи и географию переводи на английский, lowercase. Короткие устоявшиеся формулировки: thrash metal, power metal, 80s, 90s, 2000s, classic rock, finnish metal, german metal.
-- Важно: если пользователь называет страну/сцену вместе с жанром ("норвежский black metal", "финский метал") — давай один составной тег: norwegian black metal, finnish metal. Не разделяй на отдельные теги ("norwegian" + "black metal"): по отдельности каталог отдаёт не тех артистов.
-- То же для жанр + эпоха: "synthpop 80s", "disco 70s" — один тег: 80s synthpop, 70s disco. Не разделяй на "synthpop" и "80s": по "synthpop" приходят и современные артисты, по "80s" — кто угодно из 80-х, в ответе получается смесь.
-- Не добавляй настроение и расплывчатые эпитеты ("мрачный", "кайфовый") — только жанры, эпохи, географию. Не выдумывай теги и артистов.
+- Только положительные пожелания. Фразы "не хочу X", "без Y" — игнорируй.
+- Жанры, эпохи и географию переводи на английский, lowercase.
+- Составные теги НЕ разделяй: страна + жанр → один тег (norwegian black metal, finnish metal). Жанр + эпоха → один тег (80s synthpop, 70s disco). Причина: по отдельным тегам каталог отдаёт нерелевантные результаты.
+- Диапазоны эпох ("конец 80-х — начало 90-х", "late 80s early 90s") → два тега: 80s, 90s.
+- Не добавляй настроение и расплывчатые эпитеты ("мрачный", "кайфовый", "aggressive") — только жанры, эпохи, географию.
+- Не выдумывай теги и артистов, которых пользователь не упоминал.
 
-Формат ответа:
-- Строго один JSON: {"artists": ["..."], "tags": ["..."]}. Поля опциональны: только жанр — только tags; только артисты — только artists. Если ничего извлечь нельзя — верни {}.`;
+Язык пользователя может быть любым — всегда отвечай JSON, теги всегда на английском.
+
+Примеры:
+
+Ввод: "хочу что-то похожее на Металику и Слэйер, трэш метал 80х"
+Ответ: {"artists": ["Metallica", "Slayer"], "tags": ["80s thrash metal"]}
+
+Ввод: "норвежский блэк метал, как Даркстроун"
+Ответ: {"artists": ["Darkthrone"], "tags": ["norwegian black metal"]}
+
+Ввод: "something like Radiohead but more electronic"
+Ответ: {"artists": ["Radiohead"], "tags": ["electronic"]}
+
+Ввод: "финский метал"
+Ответ: {"tags": ["finnish metal"]}
+
+Ввод: "что-то между Green Day и Blink-182"
+Ответ: {"artists": ["Green Day", "Blink-182"]}
+
+Ввод: "мне нравится песня Master of Puppets"
+Ответ: {"artists": ["Metallica"]}
+
+Ввод: "привет, как дела?"
+Ответ: {}`;
 
 export async function parseRecommendationQuery(
   userMessage: string,
@@ -31,11 +56,17 @@ export async function parseRecommendationQuery(
   const ai = new GoogleGenAI({ apiKey });
 
   const model = MODEL_ENV || DEFAULT_MODEL;
+  const supportsJsonMode = !model.toLowerCase().includes("gemma");
   const contents = `${INSTRUCTION}\n\nСообщение пользователя: ${userMessage.trim()}`;
 
   const response = await ai.models.generateContent({
     model,
     contents,
+    ...(supportsJsonMode && {
+      config: {
+        responseMimeType: "application/json",
+      },
+    }),
   });
 
   const text = (response as { text?: string }).text?.trim();
@@ -43,7 +74,7 @@ export async function parseRecommendationQuery(
     return {};
   }
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  const jsonMatch = supportsJsonMode ? null : text.match(/\{[\s\S]*\}/);
   const raw = jsonMatch ? jsonMatch[0] : text;
 
   try {
@@ -63,7 +94,8 @@ export async function parseRecommendationQuery(
             .map((t) => (t as string).trim().toLowerCase())
         : undefined,
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[Gemini] Failed to parse response as JSON. Raw text: ${raw.slice(0, 500)}`, err);
     return {};
   }
 }

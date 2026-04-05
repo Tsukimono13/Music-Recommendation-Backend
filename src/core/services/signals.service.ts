@@ -1,5 +1,5 @@
 import {
-  searchArtist,
+  searchLastfmArtist,
   getSimilarArtists,
   getArtistTopTags,
 } from "../providers/lastfm.provider";
@@ -8,26 +8,33 @@ import { getMusicBrainzTags } from "../providers/musicbrainz.provider";
 import { adaptMusicBrainzTags } from "../adapters/musicbrainz.adapter";
 import { MusicSignal } from "../models/music-signal.model";
 
+const MB_TIMEOUT_MS = 2000;
+
 export async function collectSignalsForArtist(
   artist: string,
   apiKeys: { lastfm: string },
 ): Promise<MusicSignal[]> {
-  const resolved = await searchArtist(artist, apiKeys.lastfm);
+  const resolved = await searchLastfmArtist(artist, apiKeys.lastfm);
   const canonicalName = resolved?.name ?? artist.trim();
   const mbid = resolved?.mbid ?? null;
+
+  // MusicBrainz запускаем параллельно, но не ждём дольше MB_TIMEOUT_MS —
+  // это дополнительные теги, не критичные для результата
+  const mbPromise = Promise.race([
+    getMusicBrainzTags(artist).catch(() => [] as { name: string; count: number }[]),
+    new Promise<{ name: string; count: number }[]>((resolve) =>
+      setTimeout(() => resolve([]), MB_TIMEOUT_MS),
+    ),
+  ]);
 
   const [similar, lastfmTags, mbTags] = await Promise.all([
     getSimilarArtists(canonicalName, apiKeys.lastfm, { mbid }),
     getArtistTopTags(canonicalName, apiKeys.lastfm),
-    getMusicBrainzTags(artist).catch(() => {
-      console.warn(`[Signals] MusicBrainz failed for ${artist}, continuing without MB tags`);
-      return [];
-    }),
+    mbPromise,
   ]);
 
   const signals: MusicSignal[] = [];
 
-  // 🔹 Last.fm — похожие артисты
   for (const a of similar) {
     signals.push({
       source: "lastfm",
@@ -37,10 +44,7 @@ export async function collectSignalsForArtist(
     });
   }
 
-  // 🔹 Last.fm — теги
   signals.push(...lastfmTagsToSignals(lastfmTags));
-
-  // 🔹 MusicBrainz — теги
   signals.push(...adaptMusicBrainzTags(mbTags));
 
   return signals;
