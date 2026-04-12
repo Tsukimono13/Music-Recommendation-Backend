@@ -1,11 +1,109 @@
 import { QueryInput } from "../models/query-input.model";
 import { detectQueryMode } from "./query-mode.service";
-import { collectSignalsForArtist } from "./signals.service";
+import { collectSignalsForArtist, ArtistSignalsResult } from "./signals.service";
 import { buildRecommendations } from "./recommend.service";
 import { intersectArtistSignals } from "./intersection.service";
 import { MusicSignal } from "../models/music-signal.model";
 import { normalizeTag, normalizeArtistName, normalizeArtistDisplayName, isSensibleArtistName } from "../utils/normalize";
 import { searchSpotifyArtist } from "../providers/spotify.provider";
+
+// ── Fallback: если Gemini изменил имя артиста и Last.fm не нашёл похожих,
+// ── пробуем оригинальное написание из сообщения пользователя ──
+
+/**
+ * Простое посимвольное расстояние (количество различающихся позиций + разница длин).
+ * Не полноценный Левенштейн, но достаточно для обнаружения Louna→Loona, Aria→Ария и т.п.
+ */
+function charDiffCount(a: string, b: string): number {
+  const minLen = Math.min(a.length, b.length);
+  let diffs = Math.abs(a.length - b.length);
+  for (let i = 0; i < minLen; i++) {
+    if (a[i] !== b[i]) diffs++;
+  }
+  return diffs;
+}
+
+/**
+ * Ищет в оригинальном сообщении слова/фразы, похожие на имя от Gemini,
+ * но написанные иначе (Louna vs Loona). Возвращает кандидатов для fallback.
+ */
+function extractAlternativeNames(geminiName: string, originalMessage: string): string[] {
+  const lowerName = geminiName.toLowerCase();
+  const lowerMsg = originalMessage.toLowerCase();
+
+  // Точное совпадение — Gemini ничего не менял, fallback не нужен
+  if (lowerMsg.includes(lowerName)) return [];
+
+  const words = originalMessage.split(/[\s,;!?.]+/).filter((w) => w.length >= 2);
+  const nameParts = geminiName.split(/\s+/);
+  const alternatives: string[] = [];
+
+  if (nameParts.length === 1) {
+    // Однословное имя — ищем похожее слово
+    for (const word of words) {
+      const lw = word.toLowerCase();
+      if (lw === lowerName) continue;
+      // Тот же скрипт (оба латиница или оба кириллица), первая буква совпадает,
+      // длина ±2, расхождение ≤ 2 символа
+      if (
+        lw[0] === lowerName[0] &&
+        Math.abs(lw.length - lowerName.length) <= 2 &&
+        charDiffCount(lw, lowerName) <= 2
+      ) {
+        alternatives.push(word);
+      }
+    }
+  } else {
+    // Многословное имя — ищем n-грамму той же длины
+    const n = nameParts.length;
+    for (let i = 0; i <= words.length - n; i++) {
+      const phrase = words.slice(i, i + n).join(" ");
+      const lp = phrase.toLowerCase();
+      if (lp === lowerName) continue;
+      if (charDiffCount(lp, lowerName) <= 2) {
+        alternatives.push(phrase);
+      }
+    }
+  }
+
+  return alternatives;
+}
+
+/**
+ * Обёртка над collectSignalsForArtist с fallback:
+ * если артист от Gemini не дал похожих на Last.fm,
+ * пробуем оригинальное написание из сообщения.
+ */
+async function collectSignalsWithFallback(
+  artistName: string,
+  apiKeys: { lastfm: string },
+  originalMessage?: string,
+): Promise<ArtistSignalsResult> {
+  const result = await collectSignalsForArtist(artistName, apiKeys);
+
+  const hasSimilar = result.signals.some(
+    (s) => s.kind === "artist" && s.source === "lastfm",
+  );
+
+  if (hasSimilar || !originalMessage) return result;
+
+  // Нет похожих артистов — пробуем альтернативные имена из оригинального сообщения
+  const alternatives = extractAlternativeNames(artistName, originalMessage);
+  for (const alt of alternatives) {
+    const altResult = await collectSignalsForArtist(alt, apiKeys);
+    const altHasSimilar = altResult.signals.some(
+      (s) => s.kind === "artist" && s.source === "lastfm",
+    );
+    if (altHasSimilar) {
+      console.info(
+        `[Fallback] Gemini вернул "${artistName}", но Last.fm не нашёл похожих. Использован оригинал "${alt}" из сообщения.`,
+      );
+      return altResult;
+    }
+  }
+
+  return result;
+}
 
 export interface QueryResult {
   artists: { artist: string; score: number; spotifyUrl?: string }[];
@@ -122,16 +220,16 @@ export async function resolveQuery(
 
   switch (mode) {
     case "single": {
-      const signals = await collectSignalsForArtist(input.artists![0], {
+      const { signals, canonicalName } = await collectSignalsWithFallback(input.artists![0], {
         lastfm: apiKey,
-      });
+      }, input.originalMessage);
 
       const artistSignals = signals.filter(
         (s) => s.kind === "artist" && s.source === "lastfm",
       );
 
       const result = await buildRecommendations(artistSignals, apiKey);
-      const filtered = excludeInputArtists(result.artists, input.artists!);
+      const filtered = excludeInputArtists(result.artists, [input.artists![0], canonicalName]);
       const normalized = normalizeToPercent(filtered);
       const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 
@@ -144,12 +242,14 @@ export async function resolveQuery(
     }
 
     case "intersection": {
-      const all = await Promise.all(
+      const results = await Promise.all(
         input.artists!.map((a) =>
-          collectSignalsForArtist(a, { lastfm: apiKey }),
+          collectSignalsWithFallback(a, { lastfm: apiKey }, input.originalMessage),
         ),
       );
 
+      const all = results.map((r) => r.signals);
+      const canonicalNames = results.map((r) => r.canonicalName);
       const intersection = intersectArtistSignals(all);
 
       const allSignalsFlat = all.flat();
@@ -182,7 +282,7 @@ export async function resolveQuery(
           }
         }
 
-        const filteredFallback = excludeInputArtists(fallbackArtists, input.artists!);
+        const filteredFallback = excludeInputArtists(fallbackArtists, [...input.artists!, ...canonicalNames]);
         const normalizedFallback = normalizeToPercent(filteredFallback);
         const { enriched: enrichedFallback } = await enrichArtistsWithSpotifyUrls(normalizedFallback);
 
@@ -195,7 +295,7 @@ export async function resolveQuery(
       }
 
       // Если есть пересечения, возвращаем их
-      const filtered = excludeInputArtists(intersection, input.artists!);
+      const filtered = excludeInputArtists(intersection, [...input.artists!, ...canonicalNames]);
       const normalized = normalizeToPercent(filtered);
       const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 
@@ -225,18 +325,20 @@ export async function resolveQuery(
 
     case "artist+tags": {
       const notFoundArtists: string[] = [];
+      const canonicalNames: string[] = [];
 
       // Собираем сигналы для каждого артиста отдельно, чтобы проверить результаты
       const artistSignalsResults = await Promise.all(
         input.artists!.map(async (artistName) => {
-          const signals = await collectSignalsForArtist(artistName, {
+          const { signals, canonicalName } = await collectSignalsWithFallback(artistName, {
             lastfm: apiKey,
-          });
+          }, input.originalMessage);
           const similarArtists = signals.filter(
             (s) => s.kind === "artist" && s.source === "lastfm",
           );
           return {
             artistName,
+            canonicalName,
             signals,
             hasSimilar: similarArtists.length > 0,
           };
@@ -245,6 +347,7 @@ export async function resolveQuery(
 
       // Проверяем, какие артисты не дали похожих артистов
       for (const result of artistSignalsResults) {
+        canonicalNames.push(result.canonicalName);
         if (!result.hasSimilar) {
           notFoundArtists.push(result.artistName);
         }
@@ -266,7 +369,7 @@ export async function resolveQuery(
         apiKey,
       );
 
-      const filtered = excludeInputArtists(result.artists, input.artists!);
+      const filtered = excludeInputArtists(result.artists, [...input.artists!, ...canonicalNames]);
       const normalized = normalizeToPercent(filtered);
       const { enriched } = await enrichArtistsWithSpotifyUrls(normalized);
 

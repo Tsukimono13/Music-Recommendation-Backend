@@ -1,6 +1,7 @@
 import { Express, Request, Response } from "express";
 import { resolveQuery } from "../core/services/resolve-query.service";
 import { parseRecommendationQuery } from "../core/services/query-from-message.service";
+import { QueryInput } from "../core/models/query-input.model";
 import { asyncHandler } from "./middleware/error-handler.middleware";
 import { apiRateLimiter } from "./middleware/rate-limit.middleware";
 
@@ -42,20 +43,29 @@ export function registerRoutes(app: Express) {
         throw new Error("LASTFM_API_KEY is not configured");
       }
 
-      let input: { artists?: string[]; tags?: string[] };
+      let input: QueryInput;
 
       if (typeof body.message === "string" && body.message.trim()) {
+        const trimmedMessage = body.message.trim();
         const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
         if (!geminiKey) {
           throw new Error("GEMINI_API_KEY (or GOOGLE_AI_API_KEY) is required for message-based recommendations");
         }
-        input = await parseRecommendationQuery(body.message.trim(), geminiKey);
+        input = await parseRecommendationQuery(trimmedMessage, geminiKey);
         if (!input.artists?.length && !input.tags?.length) {
-          return res.status(400).json({
-            error: "Could not extract artists or tags from the message",
-            parsed: input,
-          });
+          // Gemini не распознал — если сообщение короткое (1-2 слова),
+          // скорее всего это имя артиста, пробуем напрямую
+          const wordCount = trimmedMessage.split(/\s+/).length;
+          if (wordCount <= 2) {
+            input = { artists: [trimmedMessage] };
+          } else {
+            return res.status(400).json({
+              error: "Could not extract artists or tags from the message",
+              parsed: input,
+            });
+          }
         }
+        input.originalMessage = trimmedMessage;
       } else {
         input = { artists: body.artists, tags: body.tags };
         const hasArtists = Array.isArray(input.artists) && input.artists.some((a) => typeof a === "string" && a.trim());

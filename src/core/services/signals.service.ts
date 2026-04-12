@@ -10,18 +10,24 @@ import { MusicSignal } from "../models/music-signal.model";
 
 const MB_TIMEOUT_MS = 2000;
 
+export interface ArtistSignalsResult {
+  signals: MusicSignal[];
+  canonicalName: string;
+}
+
 export async function collectSignalsForArtist(
   artist: string,
   apiKeys: { lastfm: string },
-): Promise<MusicSignal[]> {
+): Promise<ArtistSignalsResult> {
   const resolved = await searchLastfmArtist(artist, apiKeys.lastfm);
   const canonicalName = resolved?.name ?? artist.trim();
   const mbid = resolved?.mbid ?? null;
 
   // MusicBrainz запускаем параллельно, но не ждём дольше MB_TIMEOUT_MS —
-  // это дополнительные теги, не критичные для результата
+  // это дополнительные теги, не критичные для результата.
+  // Используем canonicalName (исправленное Last.fm), а не исходный ввод.
   const mbPromise = Promise.race([
-    getMusicBrainzTags(artist).catch(() => [] as { name: string; count: number }[]),
+    getMusicBrainzTags(canonicalName).catch(() => [] as { name: string; count: number }[]),
     new Promise<{ name: string; count: number }[]>((resolve) =>
       setTimeout(() => resolve([]), MB_TIMEOUT_MS),
     ),
@@ -47,5 +53,5 @@ export async function collectSignalsForArtist(
   signals.push(...lastfmTagsToSignals(lastfmTags));
   signals.push(...adaptMusicBrainzTags(mbTags));
 
-  return signals;
+  return { signals, canonicalName };
 }
