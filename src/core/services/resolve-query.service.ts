@@ -112,6 +112,7 @@ export interface QueryResult {
   fallbackReason?: string;
   notFoundArtists?: string[];
   notFoundTags?: string[];
+  _debug?: string[];
 }
 
 function normalizeToPercent(
@@ -320,6 +321,7 @@ export async function resolveQuery(
       return {
         artists: enriched,
         notFoundTags: result.notFoundTags.length > 0 ? result.notFoundTags : undefined,
+        _debug: result._debug,
       };
     }
 

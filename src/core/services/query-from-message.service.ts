@@ -97,7 +97,7 @@ export async function parseRecommendationQuery(
     if (!parsed.artists && !parsed.tags) {
       return {};
     }
-    return {
+    const result = {
       artists: Array.isArray(parsed.artists)
         ? parsed.artists
             .filter((a) => typeof a === "string" && (a as string).trim())
@@ -109,6 +109,8 @@ export async function parseRecommendationQuery(
             .map((t) => (t as string).trim().toLowerCase())
         : undefined,
     };
+    console.log(`[Gemini] Parsed: ${JSON.stringify(result)}`);
+    return result;
   } catch (err) {
     console.warn(`[Gemini] Failed to parse response as JSON. Raw text: ${raw.slice(0, 500)}`, err);
     return {};

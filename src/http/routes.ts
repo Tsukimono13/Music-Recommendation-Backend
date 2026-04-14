@@ -78,6 +78,10 @@ export function registerRoutes(app: Express) {
       }
 
       const result = await resolveQuery(input, lastFmKey);
+      // Добавляем parsed input в _debug для диагностики
+      if (result._debug) {
+        result._debug.unshift(`gemini_parsed: ${JSON.stringify({ artists: input.artists, tags: input.tags })}`);
+      }
       res.json(result);
     }),
   );

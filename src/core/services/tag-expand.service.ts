@@ -5,6 +5,7 @@ import { normalizeArtistName } from "../utils/normalize";
 export interface TagExpandResult {
   signals: MusicSignal[];
   notFoundTags: string[];
+  _debug?: string[];
 }
 
 const DECADE_WORDS = new Set(["70s", "80s", "90s", "2000s", "2010s"]);
@@ -41,11 +42,13 @@ async function expandSingleTag(
   limit?: number,
 ): Promise<MusicSignal[]> {
   let artists = await getTopArtistsByTag(tagValue, apiKey, limit);
+  console.log(`[TagExpand] "${tagValue}" (limit=${limit ?? 20}) → ${artists.length} artists`);
 
   if (artists.length < MIN_ARTISTS_BEFORE_FALLBACK && isEraGenreCompoundTag(tagValue)) {
     const split = splitEraGenreTag(tagValue);
     if (split) {
       const [era, genre] = split;
+      console.log(`[TagExpand] Compound tag split: "${era}" + "${genre}"`);
       const [eraArtists, genreArtists] = await Promise.all([
         getTopArtistsByTag(era, apiKey, FALLBACK_LIMIT),
         getTopArtistsByTag(genre, apiKey, FALLBACK_LIMIT),
@@ -115,7 +118,9 @@ export async function expandTagsToArtistSignals(
   }
 
   const notFoundTags: string[] = [];
+  const debug: string[] = [];
   const needsIntersection = tagMap.size > 1;
+  debug.push(`tags=${JSON.stringify([...tagMap.keys()])}, needsIntersection=${needsIntersection}`);
 
   // Разворачиваем каждый тег отдельно
   // Для пересечения нужно больше артистов на тег, иначе overlap слишком маленький
@@ -130,12 +135,17 @@ export async function expandTagsToArtistSignals(
   );
 
   const nonEmpty = perTagResults.filter((r) => r.signals.length > 0);
+  for (const r of perTagResults) {
+    debug.push(`"${r.tagValue}" → ${r.signals.length} artists`);
+  }
 
   // Один тег или все пустые — возвращаем как есть
   if (nonEmpty.length <= 1) {
+    debug.push("result=single-tag-passthrough");
     return {
       signals: nonEmpty.flatMap((r) => r.signals),
       notFoundTags,
+      _debug: debug,
     };
   }
 
@@ -169,6 +179,8 @@ export async function expandTagsToArtistSignals(
     }
   }
 
+  debug.push(`intersection=${intersectionKeys.size} (min=${MIN_INTERSECTION_SIZE})`);
+
   if (intersectionKeys.size >= MIN_INTERSECTION_SIZE) {
     // Хорошее пересечение — возвращаем только артистов из всех тегов
     const signals: MusicSignal[] = [];
@@ -184,7 +196,8 @@ export async function expandTagsToArtistSignals(
         weight: totalWeight,
       });
     }
-    return { signals, notFoundTags };
+    debug.push(`result=intersection, artists=${signals.length}`);
+    return { signals, notFoundTags, _debug: debug };
   }
 
   // Пересечение слишком маленькое — объединяем, но артисты
@@ -216,5 +229,6 @@ export async function expandTagsToArtistSignals(
     });
   }
 
-  return { signals, notFoundTags };
+  debug.push(`result=fallback-union, artists=${signals.length}`);
+  return { signals, notFoundTags, _debug: debug };
 }
