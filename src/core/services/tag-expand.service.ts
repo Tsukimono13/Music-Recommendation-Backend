@@ -9,7 +9,7 @@ export interface TagExpandResult {
 }
 
 const DECADE_WORDS = new Set(["70s", "80s", "90s", "2000s", "2010s"]);
-const FALLBACK_LIMIT = 50;
+const FALLBACK_LIMIT = 200;
 const MIN_INTERSECTION_SIZE = 3;
 
 function isEraGenreCompoundTag(tag: string): boolean {
@@ -78,18 +78,9 @@ async function expandSingleTag(
         // Если пересечение пустое — fallback на union
       }
 
-      if (eraArtists.length > 0 || genreArtists.length > 0) {
-        const signals: MusicSignal[] = [];
-        for (const a of [...eraArtists, ...genreArtists]) {
-          signals.push({
-            kind: "artist",
-            source: "lastfm",
-            value: a.name,
-            weight: tagWeight * (1 / a.rank),
-          });
-        }
-        return signals;
-      }
+      // Для составных тегов не возвращаем union — лучше пустой результат,
+      // чем мешанина из двух несвязанных списков
+      return [];
     }
   }
 
