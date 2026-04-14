@@ -1,5 +1,6 @@
 import { MusicSignal } from "../models/music-signal.model";
 import { getTopArtistsByTag } from "../providers/lastfm.provider";
+import { normalizeArtistName } from "../utils/normalize";
 
 export interface TagExpandResult {
   signals: MusicSignal[];
@@ -9,6 +10,7 @@ export interface TagExpandResult {
 const DECADE_WORDS = new Set(["70s", "80s", "90s", "2000s", "2010s"]);
 const MIN_ARTISTS_BEFORE_FALLBACK = 5;
 const FALLBACK_LIMIT = 50;
+const MIN_INTERSECTION_SIZE = 3;
 
 function isEraGenreCompoundTag(tag: string): boolean {
   const parts = tag.toLowerCase().trim().split(/\s+/).filter(Boolean);
@@ -28,6 +30,79 @@ function splitEraGenreTag(tag: string): [string, string] | null {
   return [era, genre];
 }
 
+/**
+ * Разворачивает один тег в список артистов.
+ * Для составных тегов (эпоха+жанр) пробует пересечение через splitEraGenreTag.
+ */
+async function expandSingleTag(
+  tagValue: string,
+  tagWeight: number,
+  apiKey: string,
+): Promise<MusicSignal[]> {
+  let artists = await getTopArtistsByTag(tagValue, apiKey);
+
+  if (artists.length < MIN_ARTISTS_BEFORE_FALLBACK && isEraGenreCompoundTag(tagValue)) {
+    const split = splitEraGenreTag(tagValue);
+    if (split) {
+      const [era, genre] = split;
+      const [eraArtists, genreArtists] = await Promise.all([
+        getTopArtistsByTag(era, apiKey, FALLBACK_LIMIT),
+        getTopArtistsByTag(genre, apiKey, FALLBACK_LIMIT),
+      ]);
+      if (eraArtists.length > 0 && genreArtists.length > 0) {
+        // Пересекаем: только артисты, присутствующие в обоих списках
+        const genreSet = new Map<string, { name: string; rank: number }>();
+        for (const a of genreArtists) {
+          genreSet.set(a.name.toLowerCase(), a);
+        }
+
+        const signals: MusicSignal[] = [];
+        for (const a of eraArtists) {
+          const genreMatch = genreSet.get(a.name.toLowerCase());
+          if (genreMatch) {
+            const combinedWeight = tagWeight * (1 / a.rank + 1 / genreMatch.rank) / 2;
+            signals.push({
+              kind: "artist",
+              source: "lastfm",
+              value: a.name,
+              weight: combinedWeight,
+            });
+          }
+        }
+
+        if (signals.length > 0) {
+          return signals;
+        }
+        // Если пересечение пустое — fallback на union
+      }
+
+      if (eraArtists.length > 0 || genreArtists.length > 0) {
+        const signals: MusicSignal[] = [];
+        for (const a of [...eraArtists, ...genreArtists]) {
+          signals.push({
+            kind: "artist",
+            source: "lastfm",
+            value: a.name,
+            weight: tagWeight * (1 / a.rank),
+          });
+        }
+        return signals;
+      }
+    }
+  }
+
+  if (artists.length === 0) {
+    return [];
+  }
+
+  return artists.map((a) => ({
+    kind: "artist" as const,
+    source: "lastfm" as const,
+    value: a.name,
+    weight: tagWeight * (1 / a.rank),
+  }));
+}
+
 export async function expandTagsToArtistSignals(
   tagSignals: MusicSignal[],
   apiKey: string,
@@ -40,77 +115,103 @@ export async function expandTagsToArtistSignals(
 
   const notFoundTags: string[] = [];
 
-  const expandedResults = await Promise.all(
+  // Разворачиваем каждый тег отдельно
+  const perTagResults = await Promise.all(
     Array.from(tagMap.entries()).map(async ([tagValue, tagWeight]) => {
-      let artists = await getTopArtistsByTag(tagValue, apiKey);
-
-      if (artists.length < MIN_ARTISTS_BEFORE_FALLBACK && isEraGenreCompoundTag(tagValue)) {
-        const split = splitEraGenreTag(tagValue);
-        if (split) {
-          const [era, genre] = split;
-          const [eraArtists, genreArtists] = await Promise.all([
-            getTopArtistsByTag(era, apiKey, FALLBACK_LIMIT),
-            getTopArtistsByTag(genre, apiKey, FALLBACK_LIMIT),
-          ]);
-          if (eraArtists.length > 0 && genreArtists.length > 0) {
-            // Пересекаем: только артисты, присутствующие в обоих списках
-            const genreSet = new Map<string, { name: string; rank: number }>();
-            for (const a of genreArtists) {
-              genreSet.set(a.name.toLowerCase(), a);
-            }
-
-            const signals: MusicSignal[] = [];
-            for (const a of eraArtists) {
-              const genreMatch = genreSet.get(a.name.toLowerCase());
-              if (genreMatch) {
-                // Артист есть в обоих списках — берём, вес = среднее из двух рангов
-                const combinedWeight = tagWeight * (1 / a.rank + 1 / genreMatch.rank) / 2;
-                signals.push({
-                  kind: "artist",
-                  source: "lastfm",
-                  value: a.name,
-                  weight: combinedWeight,
-                });
-              }
-            }
-
-            if (signals.length > 0) {
-              return signals;
-            }
-            // Если пересечение пустое — fallback на union (лучше что-то, чем ничего)
-          }
-
-          if (eraArtists.length > 0 || genreArtists.length > 0) {
-            const signals: MusicSignal[] = [];
-            for (const a of [...eraArtists, ...genreArtists]) {
-              signals.push({
-                kind: "artist",
-                source: "lastfm",
-                value: a.name,
-                weight: tagWeight * (1 / a.rank),
-              });
-            }
-            return signals;
-          }
-        }
-      }
-
-      if (artists.length === 0) {
+      const signals = await expandSingleTag(tagValue, tagWeight, apiKey);
+      if (signals.length === 0) {
         notFoundTags.push(tagValue);
-        return [];
       }
-
-      return artists.map((a) => ({
-        kind: "artist" as const,
-        source: "lastfm" as const,
-        value: a.name,
-        weight: tagWeight * (1 / a.rank),
-      }));
+      return { tagValue, signals };
     }),
   );
 
-  return {
-    signals: expandedResults.flat(),
-    notFoundTags,
-  };
+  const nonEmpty = perTagResults.filter((r) => r.signals.length > 0);
+
+  // Один тег или все пустые — возвращаем как есть
+  if (nonEmpty.length <= 1) {
+    return {
+      signals: nonEmpty.flatMap((r) => r.signals),
+      notFoundTags,
+    };
+  }
+
+  // Несколько тегов — пересекаем: оставляем только артистов из всех списков
+  const perTagArtistMaps = nonEmpty.map((r) => {
+    const map = new Map<string, number>();
+    for (const s of r.signals) {
+      const key = normalizeArtistName(s.value);
+      map.set(key, (map.get(key) ?? 0) + s.weight);
+    }
+    return map;
+  });
+
+  // Ищем артистов, присутствующих во всех тег-списках
+  const firstMap = perTagArtistMaps[0];
+  const intersectionKeys = new Set<string>();
+  for (const key of firstMap.keys()) {
+    if (perTagArtistMaps.every((m) => m.has(key))) {
+      intersectionKeys.add(key);
+    }
+  }
+
+  // Собираем display name для каждого ключа (берём первое встреченное)
+  const displayNames = new Map<string, string>();
+  for (const r of nonEmpty) {
+    for (const s of r.signals) {
+      const key = normalizeArtistName(s.value);
+      if (!displayNames.has(key)) {
+        displayNames.set(key, s.value);
+      }
+    }
+  }
+
+  if (intersectionKeys.size >= MIN_INTERSECTION_SIZE) {
+    // Хорошее пересечение — возвращаем только артистов из всех тегов
+    const signals: MusicSignal[] = [];
+    for (const key of intersectionKeys) {
+      const totalWeight = perTagArtistMaps.reduce(
+        (sum, m) => sum + (m.get(key) ?? 0),
+        0,
+      );
+      signals.push({
+        kind: "artist",
+        source: "lastfm",
+        value: displayNames.get(key)!,
+        weight: totalWeight,
+      });
+    }
+    return { signals, notFoundTags };
+  }
+
+  // Пересечение слишком маленькое — объединяем, но артисты
+  // из нескольких тегов получают бонус к весу
+  const tagCount = nonEmpty.length;
+  const merged = new Map<string, { weight: number; tagCount: number }>();
+
+  for (const tagArtistMap of perTagArtistMaps) {
+    for (const [key, weight] of tagArtistMap) {
+      const existing = merged.get(key);
+      if (existing) {
+        existing.weight += weight;
+        existing.tagCount++;
+      } else {
+        merged.set(key, { weight, tagCount: 1 });
+      }
+    }
+  }
+
+  const signals: MusicSignal[] = [];
+  for (const [key, entry] of merged) {
+    // Бонус: артист из 2/2 тегов получает ×2, из 1/2 — ×1.5
+    const multiTagBoost = 1 + entry.tagCount / tagCount;
+    signals.push({
+      kind: "artist",
+      source: "lastfm",
+      value: displayNames.get(key)!,
+      weight: entry.weight * multiTagBoost,
+    });
+  }
+
+  return { signals, notFoundTags };
 }

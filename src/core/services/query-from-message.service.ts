@@ -42,6 +42,12 @@ const INSTRUCTION = `Ты — парсер запросов к музыкаль�
 Ввод: "финский метал"
 Ответ: {"tags": ["finnish metal"]}
 
+Ввод: "90s, progressive metal"
+Ответ: {"tags": ["90s progressive metal"]}
+
+Ввод: "progressive metal 90х"
+Ответ: {"tags": ["90s progressive metal"]}
+
 Ввод: "что-то между Green Day и Blink-182"
 Ответ: {"artists": ["Green Day", "Blink-182"]}
 
