@@ -9,7 +9,6 @@ export interface TagExpandResult {
 }
 
 const DECADE_WORDS = new Set(["70s", "80s", "90s", "2000s", "2010s"]);
-const MIN_ARTISTS_BEFORE_FALLBACK = 5;
 const FALLBACK_LIMIT = 50;
 const MIN_INTERSECTION_SIZE = 3;
 
@@ -41,10 +40,9 @@ async function expandSingleTag(
   apiKey: string,
   limit?: number,
 ): Promise<MusicSignal[]> {
-  let artists = await getTopArtistsByTag(tagValue, apiKey, limit);
-  console.log(`[TagExpand] "${tagValue}" (limit=${limit ?? 20}) → ${artists.length} artists`);
-
-  if (artists.length < MIN_ARTISTS_BEFORE_FALLBACK && isEraGenreCompoundTag(tagValue)) {
+  // Для составных тегов (эпоха+жанр) сразу идём в split+intersect,
+  // прямые результаты Last.fm для таких тегов ненадёжны
+  if (isEraGenreCompoundTag(tagValue)) {
     const split = splitEraGenreTag(tagValue);
     if (split) {
       const [era, genre] = split;
@@ -95,11 +93,12 @@ async function expandSingleTag(
     }
   }
 
+  const artists = await getTopArtistsByTag(tagValue, apiKey, limit);
   if (artists.length === 0) {
     return [];
   }
 
-  return artists.map((a) => ({
+  return artists.map((a: { name: string; rank: number }) => ({
     kind: "artist" as const,
     source: "lastfm" as const,
     value: a.name,
