@@ -5,7 +5,6 @@ import { normalizeArtistName, isSensibleArtistName } from "../utils/normalize";
 export interface BuildRecommendationsResult {
   artists: { artist: string; score: number }[];
   notFoundTags: string[];
-  _debug?: string[];
 }
 
 export async function buildRecommendations(
@@ -23,7 +22,7 @@ export async function buildRecommendations(
     }
   }
 
-  const { signals: expandedArtists, notFoundTags, _debug } = await expandTagsToArtistSignals(tagSignals, apiKey);
+  const { signals: expandedArtists, notFoundTags } = await expandTagsToArtistSignals(tagSignals, apiKey);
 
   const allArtists = [...artistSignals, ...expandedArtists];
 
@@ -49,6 +48,5 @@ export async function buildRecommendations(
   return {
     artists,
     notFoundTags,
-    _debug,
   };
 }
