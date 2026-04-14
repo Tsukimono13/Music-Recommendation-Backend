@@ -75,12 +75,18 @@ async function expandSingleTag(
         if (signals.length > 0) {
           return signals;
         }
-        // Если пересечение пустое — fallback на union
       }
 
-      // Для составных тегов не возвращаем union — лучше пустой результат,
-      // чем мешанина из двух несвязанных списков
-      return [];
+      // Пересечение пустое — возвращаем жанр (более специфичный тег),
+      // а не эпоху, чтобы "90s progressive metal" → prog metal, а не 90s pop
+      if (genreArtists.length > 0) {
+        return genreArtists.map((a) => ({
+          kind: "artist" as const,
+          source: "lastfm" as const,
+          value: a.name,
+          weight: tagWeight * (1 / a.rank),
+        }));
+      }
     }
   }
 
