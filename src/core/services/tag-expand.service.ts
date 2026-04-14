@@ -38,8 +38,9 @@ async function expandSingleTag(
   tagValue: string,
   tagWeight: number,
   apiKey: string,
+  limit?: number,
 ): Promise<MusicSignal[]> {
-  let artists = await getTopArtistsByTag(tagValue, apiKey);
+  let artists = await getTopArtistsByTag(tagValue, apiKey, limit);
 
   if (artists.length < MIN_ARTISTS_BEFORE_FALLBACK && isEraGenreCompoundTag(tagValue)) {
     const split = splitEraGenreTag(tagValue);
@@ -114,11 +115,13 @@ export async function expandTagsToArtistSignals(
   }
 
   const notFoundTags: string[] = [];
+  const needsIntersection = tagMap.size > 1;
 
   // Разворачиваем каждый тег отдельно
+  // Для пересечения нужно больше артистов на тег, иначе overlap слишком маленький
   const perTagResults = await Promise.all(
     Array.from(tagMap.entries()).map(async ([tagValue, tagWeight]) => {
-      const signals = await expandSingleTag(tagValue, tagWeight, apiKey);
+      const signals = await expandSingleTag(tagValue, tagWeight, apiKey, needsIntersection ? FALLBACK_LIMIT : undefined);
       if (signals.length === 0) {
         notFoundTags.push(tagValue);
       }
