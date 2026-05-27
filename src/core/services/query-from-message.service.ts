@@ -1,6 +1,6 @@
 import type { QueryInput } from "../models/query-input.model";
-/** По умолчанию gemini-2.0-flash. Для Gemma 3 4B задайте GEMINI_MODEL=gemma-3-4b-it (если доступен в вашем API). */
-const DEFAULT_MODEL = "gemini-2.0-flash";
+/** По умолчанию gemma-4-26b-a4b-it (щедрый free tier, MoE — быстрая). Переопределить можно через GEMINI_MODEL. */
+const DEFAULT_MODEL = "gemma-4-26b-a4b-it";
 const MODEL_ENV = process.env.GEMINI_MODEL || process.env.GEMMA_MODEL;
 
 const INSTRUCTION = `Ты — парсер запросов к музыкальному рекомендательному сервису.
