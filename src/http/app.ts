@@ -9,6 +9,8 @@ import { generalRateLimiter, apiRateLimiter } from "./middleware/rate-limit.midd
 export function createApp() {
   const app = express();
 
+  app.set("trust proxy", 1);
+
   // Security headers
   app.use(
     helmet({
